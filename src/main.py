@@ -1,9 +1,7 @@
 import math
 import pygame
 
-from engine.framebuffer import Framebuffer
-from engine.vector import Vec3
-from engine.renderer import Renderer
+from engine import *
 
 WIDTH = 800
 HEIGHT = 600
@@ -40,14 +38,12 @@ cube = create_cube()
 
 angle = 0.0
 
-running = True
-
-while running:
+while True:
     dt = clock.tick(60) / 1000.0
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False
+            break
 
     angle += dt
 
