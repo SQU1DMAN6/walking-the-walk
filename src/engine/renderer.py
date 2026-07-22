@@ -1,6 +1,6 @@
 import math
 
-from engine.vector import Vec3
+from .vector import Vec3
 
 class Renderer:
     def __init__(self, width, height):
