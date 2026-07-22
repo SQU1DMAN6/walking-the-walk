@@ -1,7 +1,7 @@
 import math
 import pygame
 
-from engine import *
+from engine import * # switch to relative import if py complains
 
 WIDTH = 800
 HEIGHT = 600
