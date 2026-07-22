@@ -1,13 +1,19 @@
-import math
+# `python main.py` or `python -m main`
+
 import pygame
 
-from engine import * # switch to relative import if py complains
+from engine import *
 
-WIDTH = 800
-HEIGHT = 600
+def main():
+    WIDTH = 800
+    HEIGHT = 600
 
-def create_cube():
-    return [
+    EDGES: list[tuple[int, int]] = [
+        (0,1), (1,2), (2,3), (3,0),
+        (4,5), (5,6), (6,7), (7,4),
+        (0,4), (1,5), (2,6), (3,7)
+    ]
+    CUBE: list[Vec3] = [
         Vec3(-1, -1, -1),
         Vec3( 1, -1, -1),
         Vec3( 1,  1, -1),
@@ -18,47 +24,39 @@ def create_cube():
         Vec3(-1,  1,  1),
     ]
 
-EDGES = [
-    (0,1),(1,2),(2,3),(3,0),
-    (4,5),(5,6),(6,7),(7,4),
-    (0,4),(1,5),(2,6),(3,7)
-]
+    pygame.init()
 
-pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    clock = pygame.time.Clock()
+    buf = Framebuffer(WIDTH, HEIGHT)
+    renderer = Renderer(WIDTH, HEIGHT)
 
-screen = pygame.display.set_mode((WIDTH , HEIGHT))
+    angle = 0.0
+    try:
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return
 
-clock = pygame.time.Clock()
+            dt = clock.tick(60) / 1000.0
+            angle += dt
 
-framebuffer = Framebuffer(WIDTH, HEIGHT)
+            buf.clear((20, 20, 30))
 
-renderer = Renderer(WIDTH, HEIGHT)
+            renderer.draw_wire_cube(
+                buf,
+                CUBE,
+                EDGES,
+                angle
+            )
 
-cube = create_cube()
+            buf.present(screen)
 
-angle = 0.0
+            pygame.display.flip()
 
-while True:
-    dt = clock.tick(60) / 1000.0
+    finally:
+        pygame.quit() # idk, does pygame do this automatically?
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            break
-
-    angle += dt
-
-    framebuffer.clear((20, 20, 30))
-
-    renderer.draw_wire_cube(
-        framebuffer,
-        cube,
-        EDGES,
-        angle
-    )
-
-    framebuffer.present(screen)
-
-    pygame.display.flip()
-
-pygame.quit()
+if __name__ == '__main__':
+    main()
 
