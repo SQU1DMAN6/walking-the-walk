@@ -4,14 +4,18 @@ import pygame
 
 from engine.framebuffer import Framebuffer
 from engine.renderer import Renderer
-from engine.mesh import create_cube
+from engine.mesh import create_prism
+from engine.camera import Camera
 
-WIDTH = 800
-HEIGHT = 600
+WIDTH = 1600
+HEIGHT = 1200
 
 pygame.init()
 
-screen = pygame.display.set_mode((WIDTH , HEIGHT))
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+pygame.event.set_grab(True)
+pygame.mouse.set_visible(False)
 
 clock = pygame.time.Clock()
 
@@ -19,7 +23,7 @@ framebuffer = Framebuffer(WIDTH, HEIGHT)
 
 renderer = Renderer(WIDTH, HEIGHT)
 
-cube = create_cube()
+camera = Camera()
 
 angle = 0.0
 
@@ -32,15 +36,37 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-    angle += dt
+        if (
+            event.type == pygame.KEYDOWN
+            and
+            event.key == pygame.K_ESCAPE
+        ):
+            running = False
+
+    camera.update(dt)
 
     framebuffer.clear((20, 20, 30))
 
-    renderer.render_mesh(
-        framebuffer,
-        cube,
-        angle
-    )
+    scene = [
+        create_prism(
+            2, 2, 2,
+            (220, 80, 80),
+            (0, 0, 8)
+        ),
+        create_prism(
+            1, 4, 1,
+            (80, 220, 80),
+            (5, 0, 12)
+        ),
+        create_prism(
+            4, 1, 2,
+            (80, 80, 220),
+            (-5, 0, 15)
+        ),
+    ]
+
+    for mesh in scene:
+        renderer.render_mesh(camera, framebuffer, mesh)
 
     framebuffer.present(screen)
 

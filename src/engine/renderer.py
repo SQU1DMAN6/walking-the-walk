@@ -1,7 +1,6 @@
 import math
 
 from engine.vector import Vec3
-from engine.mesh import Mesh
 from engine.rasteriser import Rasteriser
 
 class Renderer:
@@ -35,31 +34,33 @@ class Renderer:
 
     def render_mesh(
         self,
+        camera,
         framebuffer,
-        mesh,
-        angle
+        mesh
     ):
         transformed_vertices = []
 
-        cos_a = math.cos(angle)
-        sin_a = math.sin(angle)
+        cos_yaw = math.cos(-camera.yaw)
+        sin_yaw = math.sin(-camera.yaw)
 
         for vx, vy, vz in mesh.vertices:
-            x = (
-                vx * cos_a
-                - vz * sin_a
-            )
+            x = vx + mesh.position[0]
 
-            z = (
-                vx * sin_a
-                + vz * cos_a
-            )
+            y = vy + mesh.position[1]
+            z = vz + mesh.position[2]
+
+            x -= camera.x
+            y -= camera.y
+            z -= camera.z
+
+            rx = x * cos_yaw - z * sin_yaw
+            rz = x * sin_yaw + z * cos_yaw
 
             transformed_vertices.append(
                 Vec3(
-                    x,
-                    vy,
-                    z
+                    rx,
+                    y,
+                    rz
                 )
             )
 
@@ -111,6 +112,6 @@ class Renderer:
                 p0,
                 p1,
                 p2,
-                (180, 180, 220)
+                mesh.colour
             )
 

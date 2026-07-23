@@ -2,21 +2,31 @@ class Mesh:
     def __init__(
         self,
         vertices,
-        faces
+        faces,
+        colour,
+        position
     ):
         self.vertices = vertices
         self.faces = faces
+        self.colour = colour
+        self.position = position
 
-def create_cube():
+def create_prism(
+        width,
+        height,
+        depth,
+        colour,
+        position
+):
     vertices = [
-        (-1, -1, -1),
-        ( 1, -1, -1),
-        ( 1,  1, -1),
-        (-1,  1, -1),
-        (-1, -1,  1),
-        ( 1, -1,  1),
-        ( 1,  1,  1),
-        (-1,  1,  1),
+            (-width/2, -height/2, -depth/2),
+            ( width/2, -height/2, -depth/2),
+            ( width/2,  height/2, -depth/2),
+            (-width/2,  height/2, -depth/2),
+            (-width/2, -height/2,  depth/2),
+            ( width/2, -height/2,  depth/2),
+            ( width/2,  height/2,  depth/2),
+            (-width/2,  height/2,  depth/2),
     ]
 
     faces = [
@@ -28,5 +38,5 @@ def create_cube():
         (3,7,4),(3,4,0),
     ]
 
-    return Mesh(vertices, faces)
+    return Mesh(vertices, faces, colour, position)
 
