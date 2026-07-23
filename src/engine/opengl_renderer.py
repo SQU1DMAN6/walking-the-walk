@@ -2,8 +2,10 @@ try:
     import OpenGL.GL as gl
     import OpenGL.GL.shaders as shaders
     HAS_OPENGL = True
+    print("Say Hi to OpenGL!")
 except Exception:
     HAS_OPENGL = False
+    print("No OpenGL :(")
 
 import math
 
