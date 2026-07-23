@@ -40,11 +40,11 @@ class Renderer:
     ):
         transformed_vertices = []
 
-        cos_yaw = math.cos(-camera.yaw)
-        sin_yaw = math.sin(-camera.yaw)
+        cos_yaw = math.cos(camera.yaw)
+        sin_yaw = math.sin(camera.yaw)
 
-        cos_pitch = math.cos(-camera.pitch)
-        sin_pitch = math.sin(-camera.pitch)
+        cos_pitch = math.cos(camera.pitch)
+        sin_pitch = math.sin(camera.pitch)
 
         for vx, vy, vz in mesh.vertices:
             x = vx + mesh.position[0]
