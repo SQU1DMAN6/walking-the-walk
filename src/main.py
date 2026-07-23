@@ -1,4 +1,3 @@
-#!/usr/bin/python
 import math
 import pygame
 
@@ -7,8 +6,8 @@ from engine.renderer import Renderer
 from engine.mesh import create_prism
 from engine.camera import Camera
 
-WIDTH = 1600
-HEIGHT = 1200
+WIDTH = 800
+HEIGHT = 600
 
 pygame.init()
 
@@ -73,4 +72,3 @@ while running:
     pygame.display.flip()
 
 pygame.quit()
-

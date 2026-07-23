@@ -15,6 +15,13 @@ class Rasteriser:
         p2,
         colour
     ):
+        if (
+            p0 is None
+            or p1 is None
+            or p2 is None
+        ):
+            return
+
         min_x = max(
             0,
             int(min(
@@ -51,6 +58,13 @@ class Rasteriser:
             ))
         )
 
+        if (
+            min_x >= max_x
+            or
+            min_y >= max_y
+        ):
+            return
+
         area = Rasteriser.edge(
             p0[0], p0[1],
             p1[0], p1[1],
@@ -86,4 +100,3 @@ class Rasteriser:
                     (w0 <= 0 and w1 <= 0 and w2 <= 0)
                 ):
                     framebuffer.set_pixel(x, y, colour)
-

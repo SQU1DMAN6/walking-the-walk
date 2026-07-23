@@ -8,6 +8,7 @@ class Camera:
         self.z = -8.0
 
         self.yaw = 0.0
+        self.pitch = 0.0
         self.move_speed = 5.0
         self.mouse_sensitivity = 0.003
 
@@ -18,7 +19,7 @@ class Camera:
         forward_z = math.cos(self.yaw)
 
         right_x = math.cos(self.yaw)
-        right_z = math.sin(self.yaw)
+        right_z = -math.sin(self.yaw)
 
         if keys[pygame.K_w]:
             self.x += forward_x * self.move_speed * dt
@@ -36,7 +37,16 @@ class Camera:
             self.x -= right_x * self.move_speed * dt
             self.z -= right_z * self.move_speed * dt
 
-        mouse_dx, _ = pygame.mouse.get_rel()
+        mouse_dx, mouse_dy = pygame.mouse.get_rel()
 
-        self.yaw += (mouse_dx * self.mouse_sensitivity)
+        self.yaw -= (mouse_dx * self.mouse_sensitivity)
 
+        self.pitch += (mouse_dy * self.mouse_sensitivity)
+
+        self.pitch = max(
+            -math.radians(60),
+            min(
+                math.radians(60),
+                self.pitch
+            )
+        )

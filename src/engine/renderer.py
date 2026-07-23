@@ -10,7 +10,7 @@ class Renderer:
         self.focal_length = 400
 
     def project(self, vertex):
-        z = vertex.z + 5
+        z = vertex.z
 
         if z <= 0.1:
             return None
@@ -43,6 +43,9 @@ class Renderer:
         cos_yaw = math.cos(-camera.yaw)
         sin_yaw = math.sin(-camera.yaw)
 
+        cos_pitch = math.cos(-camera.pitch)
+        sin_pitch = math.sin(-camera.pitch)
+
         for vx, vy, vz in mesh.vertices:
             x = vx + mesh.position[0]
 
@@ -56,11 +59,14 @@ class Renderer:
             rx = x * cos_yaw - z * sin_yaw
             rz = x * sin_yaw + z * cos_yaw
 
+            ry = y * cos_pitch - rz * sin_pitch
+            rz2 = y * sin_pitch + rz * cos_pitch
+
             transformed_vertices.append(
                 Vec3(
                     rx,
-                    y,
-                    rz
+                    ry,
+                    rz2
                 )
             )
 
@@ -114,4 +120,3 @@ class Renderer:
                 p2,
                 mesh.colour
             )
-
