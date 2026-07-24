@@ -40,9 +40,9 @@ class Camera:
         mouse_dx, mouse_dy = pygame.mouse.get_rel()
 
         self.yaw += (mouse_dx * self.mouse_sensitivity)
+        self.yaw = (self.yaw + math.pi) % (2.0 * math.pi) - math.pi
 
         self.pitch -= (mouse_dy * self.mouse_sensitivity)
-
         self.pitch = max(
             -math.radians(60),
             min(

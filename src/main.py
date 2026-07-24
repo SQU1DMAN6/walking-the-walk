@@ -3,6 +3,7 @@ import pygame
 
 from engine.framebuffer import Framebuffer
 from engine.renderer import Renderer
+from engine.opengl_renderer import OpenGLRenderer
 from engine.mesh import create_prism
 from engine.camera import Camera
 
@@ -11,16 +12,19 @@ HEIGHT = 600
 
 pygame.init()
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
+use_opengl = True
+
+if use_opengl:
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF)
+else:
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
 pygame.event.set_grab(True)
 pygame.mouse.set_visible(False)
 
 clock = pygame.time.Clock()
 
-framebuffer = Framebuffer(WIDTH, HEIGHT)
-
-renderer = Renderer(WIDTH, HEIGHT)
+renderer = OpenGLRenderer(WIDTH, HEIGHT) if use_opengl else Renderer(WIDTH, HEIGHT)
 
 camera = Camera()
 
@@ -44,8 +48,6 @@ while running:
 
     camera.update(dt)
 
-    framebuffer.clear((20, 20, 30))
-
     scene = [
         create_prism(
             2, 2, 2,
@@ -64,10 +66,18 @@ while running:
         ),
     ]
 
-    for mesh in scene:
-        renderer.render_mesh(camera, framebuffer, mesh)
-
-    framebuffer.present(screen)
+    if use_opengl:
+        import OpenGL.GL as gl
+        gl.glViewport(0, 0, WIDTH, HEIGHT)
+        gl.glClearColor(20/255, 20/255, 30/255, 1.0)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        for mesh in scene:
+            renderer.render_mesh(camera, None, mesh)
+    else:
+        framebuffer.clear((20, 20, 30))
+        for mesh in scene:
+            renderer.render_mesh(camera, framebuffer, mesh)
+        framebuffer.present(screen)
 
     pygame.display.flip()
 
