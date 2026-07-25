@@ -42,7 +42,7 @@ class Camera:
         self.yaw += (mouse_dx * self.mouse_sensitivity)
         self.yaw = (self.yaw + math.pi) % (2.0 * math.pi) - math.pi
 
-        self.pitch -= (mouse_dy * self.mouse_sensitivity)
+        self.pitch += (mouse_dy * self.mouse_sensitivity)
         self.pitch = max(
             -math.radians(60),
             min(

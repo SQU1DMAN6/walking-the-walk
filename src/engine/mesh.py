@@ -40,3 +40,34 @@ def create_prism(
 
     return Mesh(vertices, faces, colour, position)
 
+def create_ground(
+        width,
+        depth,
+        colour,
+        position
+):
+    hw = width / 2
+    hd = depth / 2
+
+    vertices = [
+        (-hw, 0.0, -hd),
+        (hw, 0.0, -hd),
+        (hw, 0.0, hd),
+        (-hw, 0.0, hd),
+    ]
+
+    faces = [
+        (0, 1, 2),
+        (0, 2, 3),
+    ]
+
+    back_faces = [
+        (0, 2, 1),
+        (0, 3, 2),
+    ]
+    return Mesh(
+        vertices,
+        faces + back_faces,
+        colour,
+        position
+    )

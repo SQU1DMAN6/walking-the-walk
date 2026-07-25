@@ -43,8 +43,8 @@ class Renderer:
         cos_yaw = math.cos(camera.yaw)
         sin_yaw = math.sin(camera.yaw)
 
-        cos_pitch = math.cos(camera.pitch)
-        sin_pitch = math.sin(camera.pitch)
+        cos_pitch = math.cos(-camera.pitch)
+        sin_pitch = math.sin(-camera.pitch)
 
         for vx, vy, vz in mesh.vertices:
             x = vx + mesh.position[0]
@@ -85,19 +85,6 @@ class Renderer:
             p2 = projected[i2]
 
             if (p0 is None or p1 is None or p2 is None):
-                continue
-
-            cross = (
-                (p1[0] - p0[0])
-                *
-                (p2[1] - p0[1])
-                -
-                (p1[1] - p0[1])
-                *
-                (p2[0] - p0[0])
-            )
-
-            if cross >= 0:
                 continue
 
             depth = (

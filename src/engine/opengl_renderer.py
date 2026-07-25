@@ -17,6 +17,8 @@ class OpenGLRenderer:
         self.width = width
         self.height = height
         self.focal_length = 400.0
+        self.near = 0.1
+        self.far = 200.0
 
         self.vao = gl.glGenVertexArrays(1)
         self.vbo = gl.glGenBuffers(1)
@@ -25,7 +27,7 @@ class OpenGLRenderer:
         #version 330 core
         layout (location = 0) in vec3 in_pos;
         void main() {
-            gl_Position = vec4(in_pos.xy, 0.5, 1.0);
+            gl_Position = vec4(in_pos.xy, in_pos.z, 1.0);
         }
         """
 
@@ -51,6 +53,10 @@ class OpenGLRenderer:
             print("Shader compile error:", e)
             raise
 
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glDepthFunc(gl.GL_LESS)
+        gl.glDisable(gl.GL_CULL_FACE)
+
         self.color_loc = gl.glGetUniformLocation(self.shader, "u_color")
 
     def _project(self, vertex):
@@ -63,11 +69,21 @@ class OpenGLRenderer:
         screen_y = self.height / 2 - y
         return (screen_x, screen_y)
 
+    def _depth_to_ndc(self, camera_z):
+        """Map camera-space Z to a normalised [0, 1] depth value.
+        Uses the same near/far mapping that a perspective projection would,
+        so closer objects get smaller depth values (pass GL_LESS).
+        """
+        if camera_z <= self.near:
+            return 0.0
+        z_ndc = (self.far * (camera_z - self.near)) / (camera_z * (self.far - self.near))
+        return max(0.0, min(1.0, z_ndc))
+
     def _mesh_to_vertex_list(self, camera, mesh):
         cos_yaw = math.cos(camera.yaw)
         sin_yaw = math.sin(camera.yaw)
-        cos_pitch = math.cos(camera.pitch)
-        sin_pitch = math.sin(camera.pitch)
+        cos_pitch = math.cos(-camera.pitch)
+        sin_pitch = math.sin(-camera.pitch)
 
         verts = []
         valid = []
@@ -94,7 +110,7 @@ class OpenGLRenderer:
 
             ndc_x = (p[0] / self.width) * 2.0 - 1.0
             ndc_y = 1.0 - (p[1] / self.height) * 2.0
-            ndc_z = 0.5
+            ndc_z = self._depth_to_ndc(rz2)
             valid.append(True)
             verts.append((ndc_x, ndc_y, ndc_z))
 
@@ -107,9 +123,6 @@ class OpenGLRenderer:
             p1 = verts[i1]
             p2 = verts[i2]
 
-            cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0])
-            if cross <= 0:
-                continue
             triangles.append((p0, p1, p2))
         return triangles
 
@@ -141,7 +154,8 @@ class OpenGLRenderer:
         colour_array = (gl.GLfloat * 3)(mesh.colour[0], mesh.colour[1], mesh.colour[2])
         gl.glUniform3fv(self.color_loc, 1, colour_array)
 
-        gl.glDisable(gl.GL_DEPTH_TEST)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glDepthFunc(gl.GL_LESS)
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, data_len // 3)
 
         gl.glDisableVertexAttribArray(0)

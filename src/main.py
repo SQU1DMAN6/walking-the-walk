@@ -4,7 +4,7 @@ import pygame
 from engine.framebuffer import Framebuffer
 from engine.renderer import Renderer
 from engine.opengl_renderer import OpenGLRenderer
-from engine.mesh import create_prism
+from engine.mesh import create_prism, create_ground
 from engine.camera import Camera
 
 WIDTH = 800
@@ -30,6 +30,41 @@ camera = Camera()
 
 angle = 0.0
 
+def build_scene():
+    return [
+        create_ground(
+            100,
+            100,
+            (130, 105, 70),
+            (0, -2, 20)
+        ),
+        create_prism(
+            2, 2, 2,
+            (220, 80, 80),
+            (0, 0, 8)
+        ),
+        create_prism(
+            1, 4, 1,
+            (80, 220, 80),
+            (5, 0, 12)
+        ),
+        create_prism(
+            4, 1, 2,
+            (80, 80, 220),
+            (-5, 0, 15)
+        ),
+        create_prism(
+            2, 6, 2,
+            (180, 140, 100),
+            (12, 1, 20)
+        ),
+        create_prism(
+            3, 3, 3,
+            (120, 120, 120),
+            (-10, 0, 30)
+        ),
+    ]
+
 running = True
 
 while running:
@@ -48,23 +83,7 @@ while running:
 
     camera.update(dt)
 
-    scene = [
-        create_prism(
-            2, 2, 2,
-            (220, 80, 80),
-            (0, 0, 8)
-        ),
-        create_prism(
-            1, 4, 1,
-            (80, 220, 80),
-            (5, 0, 12)
-        ),
-        create_prism(
-            4, 1, 2,
-            (80, 80, 220),
-            (-5, 0, 15)
-        ),
-    ]
+    scene = build_scene()
 
     if use_opengl:
         import OpenGL.GL as gl
