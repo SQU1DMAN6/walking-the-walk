@@ -4,8 +4,9 @@ import pygame
 from engine.framebuffer import Framebuffer
 from engine.renderer import Renderer
 from engine.opengl_renderer import OpenGLRenderer
-from engine.mesh import create_prism, create_ground
+from engine.mesh import create_prism, create_pyramid, create_ground
 from engine.camera import Camera
+from engine.worldgen import generate_world, get_terrain_height
 
 WIDTH = 800
 HEIGHT = 600
@@ -28,42 +29,9 @@ renderer = OpenGLRenderer(WIDTH, HEIGHT) if use_opengl else Renderer(WIDTH, HEIG
 
 camera = Camera()
 
-angle = 0.0
-
-def build_scene():
-    return [
-        create_ground(
-            100,
-            100,
-            (130, 105, 70),
-            (0, -2, 20)
-        ),
-        create_prism(
-            2, 2, 2,
-            (220, 80, 80),
-            (0, 0, 8)
-        ),
-        create_prism(
-            1, 4, 1,
-            (80, 220, 80),
-            (5, 0, 12)
-        ),
-        create_prism(
-            4, 1, 2,
-            (80, 80, 220),
-            (-5, 0, 15)
-        ),
-        create_prism(
-            2, 6, 2,
-            (180, 140, 100),
-            (12, 1, 20)
-        ),
-        create_prism(
-            3, 3, 3,
-            (120, 120, 120),
-            (-10, 0, 30)
-        ),
-    ]
+# Generate the procedural world once
+WORLD_SEED = 42
+world_meshes = generate_world(seed=WORLD_SEED, terrain_size=100, terrain_segments=30)
 
 running = True
 
@@ -83,18 +51,24 @@ while running:
 
     camera.update(dt)
 
-    scene = build_scene()
+    # Terrain-following collision: keep camera at terrain height + eye level
+    terrain_y = get_terrain_height(camera.x, camera.z, WORLD_SEED, 1.5)
+    eye_height = 1.6
+    if camera.y < terrain_y + eye_height:
+        camera.y = terrain_y + eye_height
 
     if use_opengl:
         import OpenGL.GL as gl
         gl.glViewport(0, 0, WIDTH, HEIGHT)
-        gl.glClearColor(20/255, 20/255, 30/255, 1.0)
+
+        gl.glClearColor(90/255, 160/255, 205/255, 1.0)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        for mesh in scene:
+
+        for mesh in world_meshes:
             renderer.render_mesh(camera, None, mesh)
     else:
-        framebuffer.clear((20, 20, 30))
-        for mesh in scene:
+        framebuffer.clear((180, 120, 80))
+        for mesh in world_meshes:
             renderer.render_mesh(camera, framebuffer, mesh)
         framebuffer.present(screen)
 

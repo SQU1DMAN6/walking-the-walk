@@ -37,16 +37,34 @@ class Camera:
             self.x -= right_x * self.move_speed * dt
             self.z -= right_z * self.move_speed * dt
 
+        # Arrow keys for pitch adjustment (spec M5)
+        if keys[pygame.K_UP]:
+            self.pitch -= self.mouse_sensitivity * 60 * dt
+        if keys[pygame.K_DOWN]:
+            self.pitch += self.mouse_sensitivity * 60 * dt
+
         mouse_dx, mouse_dy = pygame.mouse.get_rel()
 
-        self.yaw += (mouse_dx * self.mouse_sensitivity)
-        self.yaw = (self.yaw + math.pi) % (2.0 * math.pi) - math.pi
+        # Discard large mouse deltas that occur when the cursor re-centers
+        # or the window loses focus (spikes > 200 pixels).
+        if abs(mouse_dx) < 200:
+            self.yaw += mouse_dx * self.mouse_sensitivity
+        if abs(mouse_dy) < 200:
+            self.pitch += mouse_dy * self.mouse_sensitivity
 
-        self.pitch += (mouse_dy * self.mouse_sensitivity)
+        # Wrap yaw to [-pi, pi) cleanly
+        two_pi = 2.0 * math.pi
+        self.yaw = self.yaw % two_pi
+        if self.yaw > math.pi:
+            self.yaw -= two_pi
+        elif self.yaw < -math.pi:
+            self.yaw += two_pi
+
+        # Clamp pitch to prevent gimbal lock
         self.pitch = max(
-            -math.radians(90),
+            -math.radians(89),
             min(
-                math.radians(90),
+                math.radians(89),
                 self.pitch
             )
         )

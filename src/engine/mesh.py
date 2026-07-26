@@ -40,6 +40,35 @@ def create_prism(
 
     return Mesh(vertices, faces, colour, position)
 
+def create_pyramid(
+        width,
+        height,
+        depth,
+        colour,
+        position
+):
+    """Create a pyramid with a rectangular base and an apex."""
+    hw = width / 2
+    hd = depth / 2
+    vertices = [
+        (-hw, -height/2, -hd),  # 0: base back-left
+        ( hw, -height/2, -hd),  # 1: base back-right
+        ( hw, -height/2,  hd),  # 2: base front-right
+        (-hw, -height/2,  hd),  # 3: base front-left
+        (0.0,  height/2, 0.0),  # 4: apex
+    ]
+
+    faces = [
+        (0, 1, 4),  # back
+        (1, 2, 4),  # right
+        (2, 3, 4),  # front
+        (3, 0, 4),  # left
+        (0, 3, 2),  # base
+        (0, 2, 1),  # base
+    ]
+
+    return Mesh(vertices, faces, colour, position)
+
 def create_ground(
         width,
         depth,
