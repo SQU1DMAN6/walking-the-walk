@@ -8,8 +8,86 @@ except Exception:
     print("No OpenGL :(")
 
 import math
+import random
 
 from engine.vector import Vec3
+
+
+def _generate_leaf_texture(size=64):
+    """Generate a procedural leaf texture with alpha.
+
+    Returns (tex_id, width, height) — a 2D RGBA texture with leaf-like
+    patterns that can be applied to canopy meshes.
+    """
+    rng = random.Random(42)
+    # Base leaf colour: olive/grey-green
+    pixels = bytearray(size * size * 4)
+    # Generate a few leaf "blobs" scattered across the texture
+    blobs = []
+    for _ in range(12):
+        cx = rng.uniform(0.0, 1.0)
+        cy = rng.uniform(0.0, 1.0)
+        rx = rng.uniform(0.15, 0.35)
+        ry = rng.uniform(0.1, 0.25)
+        angle = rng.uniform(0, math.pi * 2)
+        ca, sa = math.cos(angle), math.sin(angle)
+        # Leaf colour variation
+        lr = rng.uniform(50, 100)
+        lg = rng.uniform(100, 160)
+        lb = rng.uniform(30, 70)
+        blobs.append((cx, cy, rx, ry, ca, sa, lr, lg, lb))
+
+    for py in range(size):
+        for px in range(size):
+            u = px / size
+            v = py / size
+            # Accumulate leaf coverage
+            max_coverage = 0.0
+            best_r = 0
+            best_g = 0
+            best_b = 0
+            for (cx, cy, rx, ry, ca, sa, lr, lg, lb) in blobs:
+                # Transform to blob-local space
+                dx = u - cx
+                dy = v - cy
+                # Rotate
+                lu = dx * ca + dy * sa
+                lv = -dx * sa + dy * ca
+                # Elliptical distance
+                dist = (lu / rx) ** 2 + (lv / ry) ** 2
+                if dist < 1.0:
+                    coverage = 1.0 - dist * dist
+                    if coverage > max_coverage:
+                        max_coverage = coverage
+                        best_r, best_g, best_b = lr, lg, lb
+
+            idx = (py * size + px) * 4
+            if max_coverage > 0.05:
+                # Add some vein-like detail
+                vein = 0.8 + 0.2 * math.sin(u * 20 + v * 15) * math.sin(v * 25 - u * 10)
+                pixels[idx] = int(min(255, best_r * vein * (0.7 + 0.3 * max_coverage)))
+                pixels[idx + 1] = int(min(255, best_g * vein * (0.7 + 0.3 * max_coverage)))
+                pixels[idx + 2] = int(min(255, best_b * vein * (0.7 + 0.3 * max_coverage)))
+                pixels[idx + 3] = int(min(255, max_coverage * 255))
+            else:
+                # Transparent
+                pixels[idx] = 0
+                pixels[idx + 1] = 0
+                pixels[idx + 2] = 0
+                pixels[idx + 3] = 0
+
+    tex_id = gl.glGenTextures(1)
+    gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
+    gl.glTexImage2D(
+        gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, size, size, 0,
+        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bytes(pixels)
+    )
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_REPEAT)
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_REPEAT)
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+    return tex_id, size, size
 
 
 class OpenGLRenderer:
@@ -27,6 +105,7 @@ class OpenGLRenderer:
         #version 330 core
         layout (location = 0) in vec3 in_cam_pos;
         layout (location = 1) in vec3 in_normal;
+        layout (location = 2) in vec2 in_texcoord;
 
         uniform float u_focal;
         uniform float u_w;
@@ -35,6 +114,7 @@ class OpenGLRenderer:
         uniform float u_far;
 
         out vec3 v_normal;
+        out vec2 v_texcoord;
 
         void main() {
             float z = max(in_cam_pos.z, 0.001);
@@ -43,6 +123,7 @@ class OpenGLRenderer:
             float clip_z = u_far * (z - u_near) / (u_far - u_near);
             gl_Position = vec4(ndc_x, ndc_y, clip_z, z);
             v_normal = in_normal;
+            v_texcoord = in_texcoord;
         }
         """
 
@@ -52,8 +133,11 @@ class OpenGLRenderer:
         uniform vec3 u_light_dir;
         uniform float u_ambient;
         uniform float u_diffuse;
+        uniform bool u_use_texture;
+        uniform sampler2D u_texture;
 
         in vec3 v_normal;
+        in vec2 v_texcoord;
 
         out vec4 f_col;
 
@@ -62,6 +146,14 @@ class OpenGLRenderer:
             vec3 norm = normalize(v_normal);
             float diff = max(dot(norm, -u_light_dir), 0.0);
             float lit = u_ambient + u_diffuse * diff;
+
+            if (u_use_texture) {
+                vec4 texel = texture(u_texture, v_texcoord);
+                if (texel.a < 0.1) discard;
+                // Mix base colour with texture
+                base = mix(base, texel.rgb, texel.a);
+            }
+
             f_col = vec4(base * lit, 1.0);
             if (f_col.r < 0.01 && f_col.g < 0.01 && f_col.b < 0.01) discard;
         }
@@ -82,6 +174,8 @@ class OpenGLRenderer:
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glDepthFunc(gl.GL_LESS)
         gl.glDisable(gl.GL_CULL_FACE)
+        gl.glEnable(gl.GL_BLEND)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
         self.color_loc = gl.glGetUniformLocation(self.shader, "u_color")
         self.focal_loc = gl.glGetUniformLocation(self.shader, "u_focal")
@@ -92,6 +186,11 @@ class OpenGLRenderer:
         self.light_dir_loc = gl.glGetUniformLocation(self.shader, "u_light_dir")
         self.ambient_loc = gl.glGetUniformLocation(self.shader, "u_ambient")
         self.diffuse_loc = gl.glGetUniformLocation(self.shader, "u_diffuse")
+        self.use_texture_loc = gl.glGetUniformLocation(self.shader, "u_use_texture")
+        self.texture_loc = gl.glGetUniformLocation(self.shader, "u_texture")
+
+        # Generate procedural leaf texture
+        self.leaf_tex_id, self.leaf_tex_w, self.leaf_tex_h = _generate_leaf_texture(64)
 
     def _compute_normal(self, p0, p1, p2):
         """Compute the normal of a triangle (p0, p1, p2) in camera space."""
@@ -128,26 +227,31 @@ class OpenGLRenderer:
             rz2 = y * sin_pitch + rz * cos_pitch
             verts.append((rx, ry, rz2))
 
-        # Build triangles with normals, applying backface culling.
-        triangles = []  # each entry: ((x,y,z,nx,ny,nz) for each of 3 verts)
+        # Build triangles with normals — no backface culling (double-sided)
+        triangles = []  # each entry: ((x,y,z,nx,ny,nz,u,v) for each of 3 verts)
         for face in mesh.faces:
             i0, i1, i2 = face
             p0 = verts[i0]
             p1 = verts[i1]
             p2 = verts[i2]
 
-            # Compute normal and cull backfaces
+            # Compute normal
             nx, ny, nz = self._compute_normal(p0, p1, p2)
 
-            # In camera space the view direction is +Z.
-            # If the normal points away from the camera (nz > 0) the face is a backface.
-            if nz > 0:
-                continue
+            # Get texcoords if available
+            if mesh.texcoords:
+                t0 = mesh.texcoords[i0]
+                t1 = mesh.texcoords[i1]
+                t2 = mesh.texcoords[i2]
+            else:
+                t0 = (0.0, 0.0)
+                t1 = (1.0, 0.0)
+                t2 = (0.5, 1.0)
 
             tri = (
-                (p0[0], p0[1], p0[2], nx, ny, nz),
-                (p1[0], p1[1], p1[2], nx, ny, nz),
-                (p2[0], p2[1], p2[2], nx, ny, nz),
+                (p0[0], p0[1], p0[2], nx, ny, nz, t0[0], t0[1]),
+                (p1[0], p1[1], p1[2], nx, ny, nz, t1[0], t1[1]),
+                (p2[0], p2[1], p2[2], nx, ny, nz, t2[0], t2[1]),
             )
             triangles.append(tri)
 
@@ -158,7 +262,7 @@ class OpenGLRenderer:
         if not triangles:
             return
 
-        # Interleave: pos.x, pos.y, pos.z, norm.x, norm.y, norm.z
+        # Interleave: pos.x, pos.y, pos.z, norm.x, norm.y, norm.z, tex.u, tex.v
         data = []
         for tri in triangles:
             for v in tri:
@@ -167,9 +271,9 @@ class OpenGLRenderer:
         if data_len == 0:
             return
 
-        # Per-vertex stride = 6 floats (3 pos + 3 normal)
+        # Per-vertex stride = 8 floats (3 pos + 3 normal + 2 texcoord)
         float_count = data_len
-        vertex_count = float_count // 6
+        vertex_count = float_count // 8
 
         import ctypes
         gl.glUseProgram(self.shader)
@@ -188,12 +292,22 @@ class OpenGLRenderer:
         gl.glUniform1f(self.ambient_loc, 0.35)
         gl.glUniform1f(self.diffuse_loc, 0.65)
 
+        # Determine if this mesh should use the leaf texture
+        # Use texture for canopy meshes (identified by greenish colour)
+        use_texture = mesh.texcoords is not None
+        gl.glUniform1i(self.use_texture_loc, 1 if use_texture else 0)
+
+        if use_texture:
+            gl.glActiveTexture(gl.GL_TEXTURE0)
+            gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
+            gl.glUniform1i(self.texture_loc, 0)
+
         gl.glBindVertexArray(self.vao)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
         arr = (gl.GLfloat * float_count)(*data)
         gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STATIC_DRAW)
 
-        stride = 6 * 4  # 6 floats per vertex
+        stride = 8 * 4  # 8 floats per vertex
 
         # Position attribute (location = 0)
         gl.glEnableVertexAttribArray(0)
@@ -202,6 +316,10 @@ class OpenGLRenderer:
         # Normal attribute (location = 1)
         gl.glEnableVertexAttribArray(1)
         gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, False, stride, ctypes.c_void_p(3 * 4))
+
+        # Texcoord attribute (location = 2)
+        gl.glEnableVertexAttribArray(2)
+        gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, False, stride, ctypes.c_void_p(6 * 4))
 
         colour_array = (gl.GLfloat * 3)(mesh.colour[0], mesh.colour[1], mesh.colour[2])
         gl.glUniform3fv(self.color_loc, 1, colour_array)
@@ -212,6 +330,7 @@ class OpenGLRenderer:
 
         gl.glDisableVertexAttribArray(0)
         gl.glDisableVertexAttribArray(1)
+        gl.glDisableVertexAttribArray(2)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)

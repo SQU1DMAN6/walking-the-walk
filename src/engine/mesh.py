@@ -4,12 +4,15 @@ class Mesh:
         vertices,
         faces,
         colour,
-        position
+        position,
+        texcoords=None,
     ):
         self.vertices = vertices
         self.faces = faces
         self.colour = colour
         self.position = position
+        self.texcoords = texcoords  # list of (u, v) pairs matching vertices
+
 
 def create_prism(
         width,
@@ -82,11 +85,13 @@ def create_ground(
     segments = 20
 
     vertices = []
+    texcoords = []
     for iz in range(segments + 1):
-        z = -hd + (depth * iz / segments)
         for ix in range(segments + 1):
             x = -hw + (width * ix / segments)
+            z = -hd + (depth * iz / segments)
             vertices.append((x, 0.0, z))
+            texcoords.append((ix / segments, iz / segments))
 
     faces = []
     for iz in range(segments):
@@ -102,5 +107,6 @@ def create_ground(
         vertices,
         faces,
         colour,
-        position
+        position,
+        texcoords=texcoords,
     )

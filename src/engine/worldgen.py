@@ -125,8 +125,8 @@ def create_tree(position, seed, height=4.0, trunk_radius=0.12):
     h_var = rng.uniform(0.7, 1.3)
     height *= h_var
     trunk_h = height * 0.55
-    crown_r = rng.uniform(0.8, 1.8)
-    crown_h = rng.uniform(1.2, 2.5)
+    crown_r = rng.uniform(0.8, 2.5)
+    crown_h = rng.uniform(1.0, 3.5)
 
     trunk_colour = (110, 85, 55)
     # Olive/grey-green eucalyptus foliage
@@ -199,32 +199,56 @@ def create_tree(position, seed, height=4.0, trunk_radius=0.12):
         (9, 11, 10),
     ]
 
-    # Crown: 8-triangle octahedral / cone shape at the top
+    # Crown: ~60-triangle canopy with 12 radial segments and 3 rings
+    # for a more tree-like, rounded appearance.
+    crown_segments = 12
     crown_base_y = trunk_h + crown_h * 0.2
+    crown_mid_y = trunk_h + crown_h * 0.55
     crown_top_y = trunk_h + crown_h
-    crown_verts = [
-        (0.0, crown_top_y, 0.0),                     # 0: apex
-        (crown_r * 0.6, crown_base_y, crown_r * 0.6),   # 1
-        (-crown_r * 0.6, crown_base_y, crown_r * 0.6),  # 2
-        (-crown_r * 0.6, crown_base_y, -crown_r * 0.6), # 3
-        (crown_r * 0.6, crown_base_y, -crown_r * 0.6),  # 4
-        (crown_r, crown_base_y - 0.3, 0.0),            # 5: lower ring
-        (-crown_r, crown_base_y - 0.3, 0.0),
-        (0.0, crown_base_y - 0.3, crown_r),
-        (0.0, crown_base_y - 0.3, -crown_r),
-    ]
-    crown_faces = [
-        # Cone top
-        (0, 1, 2),
-        (0, 2, 3),
-        (0, 3, 4),
-        (0, 4, 1),
-        # Lower ring (facing down)
-        (1, 5, 7),
-        (2, 6, 7),
-        (3, 6, 8),
-        (4, 5, 8),
-    ]
+
+    crown_verts = [(0.0, crown_top_y, 0.0)]  # 0: apex
+    crown_texcoords = [(0.5, 0.5)]  # apex texcoord
+
+    # Generate rings: upper, lower, skirt
+    ring_radii = [0.45, 0.75, 1.0]
+    ring_heights = [crown_mid_y, crown_base_y, crown_base_y - 0.4]
+    for ri in range(3):
+        r = ring_radii[ri] * crown_r
+        h = ring_heights[ri]
+        for si in range(crown_segments):
+            angle = (2.0 * math.pi * si) / crown_segments
+            x = r * math.cos(angle)
+            z = r * math.sin(angle)
+            crown_verts.append((x, h, z))
+            crown_texcoords.append((si / crown_segments, 0.2 + 0.8 * (ri / 3)))
+
+    crown_faces = []
+    # Apex to upper ring (12 triangles)
+    for si in range(crown_segments):
+        s0 = 1 + si
+        s1 = 1 + (si + 1) % crown_segments
+        crown_faces.append((0, s0, s1))
+
+    # Upper ring to lower ring (24 triangles = 12 quads)
+    upper_start = 1
+    lower_start = 1 + crown_segments
+    for si in range(crown_segments):
+        s0 = upper_start + si
+        s1 = upper_start + (si + 1) % crown_segments
+        s2 = lower_start + si
+        s3 = lower_start + (si + 1) % crown_segments
+        crown_faces.append((s0, s2, s3))
+        crown_faces.append((s0, s3, s1))
+
+    # Lower ring to skirt (24 triangles = 12 quads)
+    skirt_start = 1 + 2 * crown_segments
+    for si in range(crown_segments):
+        s0 = lower_start + si
+        s1 = lower_start + (si + 1) % crown_segments
+        s2 = skirt_start + si
+        s3 = skirt_start + (si + 1) % crown_segments
+        crown_faces.append((s0, s2, s3))
+        crown_faces.append((s0, s3, s1))
 
     # Combine into separate meshes so colours are correct
     trunk_combined_verts = trunk_verts + branch_verts
@@ -237,7 +261,7 @@ def create_tree(position, seed, height=4.0, trunk_radius=0.12):
     )
 
     trunk_mesh = Mesh(trunk_combined_verts, combined_trunk_faces, trunk_colour, position)
-    canopy_mesh = Mesh(crown_verts, crown_faces, canopy_colour, position)
+    canopy_mesh = Mesh(crown_verts, crown_faces, canopy_colour, position, texcoords=crown_texcoords)
     return trunk_mesh, canopy_mesh
 
 
@@ -347,10 +371,10 @@ def generate_world(seed=42, terrain_size=100, terrain_segments=30):
     """Generate a complete outback world scene."""
     rng = random.Random(seed)
 
-    # Terrain colours: red/orange outback palette
-    r_base = rng.randint(160, 210)
-    g_base = rng.randint(90, 130)
-    b_base = rng.randint(40, 70)
+    # Terrain colours: bright red/orange Australian outback palette
+    r_base = rng.randint(200, 240)
+    g_base = rng.randint(130, 170)
+    b_base = rng.randint(50, 90)
     terrain_colour = (r_base, g_base, b_base)
 
     terrain = generate_terrain(
