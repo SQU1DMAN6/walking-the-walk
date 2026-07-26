@@ -25,9 +25,20 @@ class OpenGLRenderer:
 
         vertex_src = """
         #version 330 core
-        layout (location = 0) in vec3 in_pos;
+        layout (location = 0) in vec3 in_cam_pos;
+
+        uniform float u_focal;
+        uniform float u_w;
+        uniform float u_h;
+        uniform float u_near;
+        uniform float u_far;
+
         void main() {
-            gl_Position = vec4(in_pos.xy, in_pos.z, 1.0);
+            float z = max(in_cam_pos.z, 0.001);
+            float ndc_x = in_cam_pos.x * u_focal / (u_w * 0.5);
+            float ndc_y = in_cam_pos.y * u_focal / (u_h * 0.5);
+            float clip_z = u_far * (z - u_near) / (u_far - u_near);
+            gl_Position = vec4(ndc_x, ndc_y, clip_z, z);
         }
         """
 
@@ -58,26 +69,11 @@ class OpenGLRenderer:
         gl.glDisable(gl.GL_CULL_FACE)
 
         self.color_loc = gl.glGetUniformLocation(self.shader, "u_color")
-
-    def _project(self, vertex):
-        z = vertex.z
-        if z <= 0.1:
-            return None
-        x = vertex.x * self.focal_length / z
-        y = vertex.y * self.focal_length / z
-        screen_x = self.width / 2 + x
-        screen_y = self.height / 2 - y
-        return (screen_x, screen_y)
-
-    def _depth_to_ndc(self, camera_z):
-        """Map camera-space Z to a normalised [0, 1] depth value.
-        Uses the same near/far mapping that a perspective projection would,
-        so closer objects get smaller depth values (pass GL_LESS).
-        """
-        if camera_z <= self.near:
-            return 0.0
-        z_ndc = (self.far * (camera_z - self.near)) / (camera_z * (self.far - self.near))
-        return max(0.0, min(1.0, z_ndc))
+        self.focal_loc = gl.glGetUniformLocation(self.shader, "u_focal")
+        self.w_loc = gl.glGetUniformLocation(self.shader, "u_w")
+        self.h_loc = gl.glGetUniformLocation(self.shader, "u_h")
+        self.near_loc = gl.glGetUniformLocation(self.shader, "u_near")
+        self.far_loc = gl.glGetUniformLocation(self.shader, "u_far")
 
     def _mesh_to_vertex_list(self, camera, mesh):
         cos_yaw = math.cos(camera.yaw)
@@ -86,7 +82,6 @@ class OpenGLRenderer:
         sin_pitch = math.sin(-camera.pitch)
 
         verts = []
-        valid = []
         for vx, vy, vz in mesh.vertices:
             x = vx + mesh.position[0] - camera.x
             y = vy + mesh.position[1] - camera.y
@@ -97,32 +92,17 @@ class OpenGLRenderer:
             ry = y * cos_pitch - rz * sin_pitch
             rz2 = y * sin_pitch + rz * cos_pitch
 
-            if rz2 <= 0.1:
-                valid.append(False)
-                verts.append((0.0, 0.0, 0.0))
-                continue
-
-            p = self._project(Vec3(rx, ry, rz2))
-            if p is None:
-                valid.append(False)
-                verts.append((0.0, 0.0, 0.0))
-                continue
-
-            ndc_x = (p[0] / self.width) * 2.0 - 1.0
-            ndc_y = 1.0 - (p[1] / self.height) * 2.0
-            ndc_z = self._depth_to_ndc(rz2)
-            valid.append(True)
-            verts.append((ndc_x, ndc_y, ndc_z))
+            # Send raw camera-space position to the GPU.
+            # The vertex shader handles projection and the GPU handles
+            # homogeneous clipping for triangles that straddle the near plane.
+            verts.append((rx, ry, rz2))
 
         triangles = []
         for face in mesh.faces:
             i0, i1, i2 = face
-            if not (valid[i0] and valid[i1] and valid[i2]):
-                continue
             p0 = verts[i0]
             p1 = verts[i1]
             p2 = verts[i2]
-
             triangles.append((p0, p1, p2))
         return triangles
 
@@ -141,6 +121,12 @@ class OpenGLRenderer:
 
         import ctypes
         gl.glUseProgram(self.shader)
+
+        gl.glUniform1f(self.focal_loc, self.focal_length)
+        gl.glUniform1f(self.w_loc, float(self.width))
+        gl.glUniform1f(self.h_loc, float(self.height))
+        gl.glUniform1f(self.near_loc, self.near)
+        gl.glUniform1f(self.far_loc, self.far)
 
         gl.glBindVertexArray(self.vao)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)

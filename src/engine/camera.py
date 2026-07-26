@@ -44,9 +44,9 @@ class Camera:
 
         self.pitch += (mouse_dy * self.mouse_sensitivity)
         self.pitch = max(
-            -math.radians(60),
+            -math.radians(90),
             min(
-                math.radians(60),
+                math.radians(90),
                 self.pitch
             )
         )
