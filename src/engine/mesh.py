@@ -46,28 +46,32 @@ def create_ground(
         colour,
         position
 ):
+    """Create a subdivided ground plane so that partial near-plane
+    clipping doesn't cause the whole mesh to disappear."""
     hw = width / 2
     hd = depth / 2
+    segments = 20
 
-    vertices = [
-        (-hw, 0.0, -hd),
-        (hw, 0.0, -hd),
-        (hw, 0.0, hd),
-        (-hw, 0.0, hd),
-    ]
+    vertices = []
+    for iz in range(segments + 1):
+        z = -hd + (depth * iz / segments)
+        for ix in range(segments + 1):
+            x = -hw + (width * ix / segments)
+            vertices.append((x, 0.0, z))
 
-    faces = [
-        (0, 1, 2),
-        (0, 2, 3),
-    ]
+    faces = []
+    for iz in range(segments):
+        for ix in range(segments):
+            i0 = iz * (segments + 1) + ix
+            i1 = iz * (segments + 1) + ix + 1
+            i2 = (iz + 1) * (segments + 1) + ix
+            i3 = (iz + 1) * (segments + 1) + ix + 1
+            faces.append((i0, i1, i2))
+            faces.append((i2, i1, i3))
 
-    back_faces = [
-        (0, 2, 1),
-        (0, 3, 2),
-    ]
     return Mesh(
         vertices,
-        faces + back_faces,
+        faces,
         colour,
         position
     )
