@@ -9,7 +9,6 @@ except Exception:
 
 import math
 import random
-import struct
 
 from engine.vector import Vec3
 
@@ -80,15 +79,11 @@ def _generate_leaf_texture(size=64):
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_REPEAT)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_REPEAT)
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-    return tex_id, size, size
+    return tex_id
 
 
 def _build_vertex_data(mesh):
-    """Pre-compute flattened vertex data for a mesh.
-
-    This is called once at creation time, not every frame.
-    Result is cached on mesh._vertex_data.
-    """
+    """Pre-compute flattened vertex data for a mesh (cached)."""
     if mesh._vertex_data is not None:
         return mesh._vertex_data, mesh._vertex_count
 
@@ -110,6 +105,48 @@ def _build_vertex_data(mesh):
     return mesh._vertex_data, mesh._vertex_count
 
 
+class BatchGroup:
+    """A group of meshes with the same colour, combined into one VBO."""
+    __slots__ = ('colour', 'use_texture', 'vertex_data', 'vertex_count')
+
+    def __init__(self, colour, use_texture, vertex_data, vertex_count):
+        self.colour = colour
+        self.use_texture = use_texture
+        self.vertex_data = vertex_data
+        self.vertex_count = vertex_count
+
+
+def build_batches(meshes):
+    """Group meshes by colour and combine into batch VBOs.
+
+    Returns a list of BatchGroup objects, one per unique colour.
+    This reduces draw calls from ~1000+ to ~50-100.
+    """
+    groups = {}  # key: (colour_tuple, use_texture) -> list of vertex_data lists
+
+    for mesh in meshes:
+        vd, vc = _build_vertex_data(mesh)
+        if vc == 0:
+            continue
+        key = (mesh.colour, mesh.texcoords is not None)
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(vd)
+
+    batches = []
+    for (colour, use_texture), data_list in groups.items():
+        # Concatenate all vertex data
+        total_len = sum(len(d) for d in data_list)
+        combined = [0.0] * total_len
+        offset = 0
+        for d in data_list:
+            combined[offset:offset + len(d)] = d
+            offset += len(d)
+        batches.append(BatchGroup(colour, use_texture, combined, total_len // 8))
+
+    return batches
+
+
 class OpenGLRenderer:
     def __init__(self, width, height):
         self.width = width
@@ -120,13 +157,6 @@ class OpenGLRenderer:
 
         self.vao = gl.glGenVertexArrays(1)
         self.vbo = gl.glGenBuffers(1)
-
-        # Cache of camera rotation values to avoid recomputing per mesh
-        self._cos_yaw = 1.0
-        self._sin_yaw = 0.0
-        self._cos_pitch = 1.0
-        self._sin_pitch = 0.0
-        self._ld = (0.0, -0.8, 0.4)
 
         vertex_src = """
         #version 330 core
@@ -235,24 +265,28 @@ class OpenGLRenderer:
         self.cos_pitch_loc = gl.glGetUniformLocation(self.shader, "u_cos_pitch")
         self.sin_pitch_loc = gl.glGetUniformLocation(self.shader, "u_sin_pitch")
 
-        self.leaf_tex_id, _, _ = _generate_leaf_texture(64)
+        self.leaf_tex_id = _generate_leaf_texture(64)
 
         # World-space sun direction (normalised)
         sun_dir = (0.4, -0.8, 0.4)
         sd_len = math.sqrt(sun_dir[0]**2 + sun_dir[1]**2 + sun_dir[2]**2)
         self.sun_world = (sun_dir[0] / sd_len, sun_dir[1] / sd_len, sun_dir[2] / sd_len)
 
-    def _update_camera_uniforms(self, camera):
-        """Update camera rotation uniforms (called once per frame, not per mesh)."""
+    def render_frame(self, camera, batches):
+        """Render all batches in one frame.
+
+        Sets camera uniforms ONCE, then draws each batch with its colour.
+        This is the main performance win: ~1000+ draw calls -> ~50-100.
+        """
+        import ctypes
+
+        gl.glUseProgram(self.shader)
+
+        # --- Camera uniforms (set once per frame) ---
         cy = math.cos(camera.yaw)
         sy = math.sin(camera.yaw)
         cp = math.cos(-camera.pitch)
         sp = math.sin(-camera.pitch)
-
-        self._cos_yaw = cy
-        self._sin_yaw = sy
-        self._cos_pitch = cp
-        self._sin_pitch = sp
 
         gl.glUniform3f(self.cam_pos_loc, camera.x, camera.y, camera.z)
         gl.glUniform1f(self.cos_yaw_loc, cy)
@@ -260,26 +294,15 @@ class OpenGLRenderer:
         gl.glUniform1f(self.cos_pitch_loc, cp)
         gl.glUniform1f(self.sin_pitch_loc, sp)
 
-        # Update light direction in camera space
+        # Light direction in camera space
         lx, ly, lz = self.sun_world
         rx = lx * cy + lz * sy
         rz = -lx * sy + lz * cy
         ry = ly * cp - rz * sp
         rz2 = ly * sp + rz * cp
-        self._ld = (rx, ry, rz2)
         gl.glUniform3f(self.light_dir_loc, rx, ry, rz2)
 
-    def render_mesh(self, camera, framebuffer, mesh):
-        vertex_data, vertex_count = _build_vertex_data(mesh)
-        if vertex_count == 0:
-            return
-
-        import ctypes
-        gl.glUseProgram(self.shader)
-
-        # Update camera uniforms (idempotent per frame — only first call matters)
-        self._update_camera_uniforms(camera)
-
+        # Projection uniforms (constant)
         gl.glUniform1f(self.focal_loc, self.focal_length)
         gl.glUniform1f(self.w_loc, float(self.width))
         gl.glUniform1f(self.h_loc, float(self.height))
@@ -289,17 +312,14 @@ class OpenGLRenderer:
         gl.glUniform1f(self.ambient_loc, 0.35)
         gl.glUniform1f(self.diffuse_loc, 0.65)
 
-        use_texture = mesh.texcoords is not None
-        gl.glUniform1i(self.use_texture_loc, 1 if use_texture else 0)
-        if use_texture:
-            gl.glActiveTexture(gl.GL_TEXTURE0)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
-            gl.glUniform1i(self.texture_loc, 0)
+        # Bind leaf texture once
+        gl.glActiveTexture(gl.GL_TEXTURE0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
+        gl.glUniform1i(self.texture_loc, 0)
 
+        # Bind VAO and VBO once
         gl.glBindVertexArray(self.vao)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
-        arr = (gl.GLfloat * len(vertex_data))(*vertex_data)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
 
         stride = 8 * 4
         gl.glEnableVertexAttribArray(0)
@@ -309,11 +329,26 @@ class OpenGLRenderer:
         gl.glEnableVertexAttribArray(2)
         gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, False, stride, ctypes.c_void_p(6 * 4))
 
-        colour_array = (gl.GLfloat * 3)(mesh.colour[0], mesh.colour[1], mesh.colour[2])
-        gl.glUniform3fv(self.color_loc, 1, colour_array)
+        # --- Draw each batch ---
+        for batch in batches:
+            if batch.vertex_count == 0:
+                continue
 
-        gl.glDrawArrays(gl.GL_TRIANGLES, 0, vertex_count)
+            # Upload batch vertex data
+            arr = (gl.GLfloat * len(batch.vertex_data))(*batch.vertex_data)
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
 
+            # Set batch colour
+            colour_array = (gl.GLfloat * 3)(batch.colour[0], batch.colour[1], batch.colour[2])
+            gl.glUniform3fv(self.color_loc, 1, colour_array)
+
+            # Set texture flag
+            gl.glUniform1i(self.use_texture_loc, 1 if batch.use_texture else 0)
+
+            # Draw
+            gl.glDrawArrays(gl.GL_TRIANGLES, 0, batch.vertex_count)
+
+        # Cleanup
         gl.glDisableVertexAttribArray(0)
         gl.glDisableVertexAttribArray(1)
         gl.glDisableVertexAttribArray(2)

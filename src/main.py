@@ -7,7 +7,7 @@ import pygame
 from engine.bitmapfont import text_surface
 from engine.framebuffer import Framebuffer
 from engine.renderer import Renderer
-from engine.opengl_renderer import OpenGLRenderer
+from engine.opengl_renderer import OpenGLRenderer, build_batches
 from engine.mesh import Mesh, create_prism, create_pyramid, create_ground
 from engine.camera import Camera
 from engine.worldgen import generate_world, get_terrain_height
@@ -30,16 +30,20 @@ pygame.mouse.set_visible(False)
 
 clock = pygame.time.Clock()
 
-renderer = OpenGLRenderer(WIDTH, HEIGHT) if use_opengl else Renderer(WIDTH, HEIGHT)
-
 camera = Camera()
 
 # Generate the procedural world once
 WORLD_SEED = 42
 world_meshes = generate_world(seed=WORLD_SEED, terrain_size=100, terrain_segments=30)
 
-# Help overlay state
-show_help = False
+renderer = OpenGLRenderer(WIDTH, HEIGHT) if use_opengl else Renderer(WIDTH, HEIGHT)
+
+if use_opengl:
+    world_batches = build_batches(world_meshes)
+else:
+    world_batches = None
+
+show_help = True
 
 HELP_TEXT = (
     "=== Walking The Walk ===\n"
@@ -47,7 +51,6 @@ HELP_TEXT = (
     "Controls:\n"
     "  W/A/S/D    - Move forward/left/backward/right\n"
     "  Mouse      - Look around\n"
-    "  Arrow keys - Pitch up/down\n"
     "\n"
     "Display:\n"
     "  F11        - Toggle fullscreen\n"
@@ -58,9 +61,10 @@ HELP_TEXT = (
     "  Ctrl+Q     - Quit game\n"
     "\n"
     "Written by Quan Thai\n"
-    "\n"
-    "Explore the Australian outback.\n"
-    "Discover its secrets."
+    "\nGoals:\n"
+    "  Explore the Australian outback.\n"
+    "  Hide from its wild animals.\n"
+    "  Discover its secrets.\n"
 )
 
 # Pre-render help text surface
@@ -133,7 +137,6 @@ def draw_help(surface):
     """Draw the help text overlay."""
     if use_opengl:
         import OpenGL.GL as gl
-        # Draw semi-transparent background
         gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glMatrixMode(gl.GL_PROJECTION)
         gl.glPushMatrix()
@@ -164,8 +167,6 @@ def draw_help(surface):
         tx = (WIDTH - _HELP_SURFACE_W) // 2
         ty = (HEIGHT - _HELP_SURFACE_H) // 2
 
-        # Flip V coords: pygame surface rows are top-to-bottom,
-        # OpenGL expects bottom-to-top
         gl.glBegin(gl.GL_QUADS)
         gl.glTexCoord2f(0, 1)
         gl.glVertex2f(tx, ty)
@@ -186,7 +187,6 @@ def draw_help(surface):
         gl.glMatrixMode(gl.GL_MODELVIEW)
         gl.glEnable(gl.GL_DEPTH_TEST)
     else:
-        # Software mode: use pygame blit
         s = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         s.fill((0, 0, 0, 180))
         surface.blit(s, (0, 0))
@@ -255,8 +255,7 @@ while running:
         gl.glClearColor(90/255, 160/255, 205/255, 1.0)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 
-        for mesh in world_meshes:
-            renderer.render_mesh(camera, None, mesh)
+        renderer.render_frame(camera, world_batches)
     else:
         framebuffer.clear((180, 120, 80))
         for mesh in world_meshes:
