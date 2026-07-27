@@ -12,8 +12,8 @@ from engine.mesh import Mesh, create_prism, create_pyramid, create_ground
 from engine.camera import Camera
 from engine.worldgen import generate_world, get_terrain_height
 
-WIDTH = 800
-HEIGHT = 600
+WIDTH = 1400
+HEIGHT = 1050
 
 pygame.init()
 pygame.display.set_caption("Walking The Walk")
@@ -115,8 +115,8 @@ def toggle_fullscreen():
         HEIGHT = display_info.current_h
         screen = pygame.display.set_mode((WIDTH, HEIGHT), flags | pygame.FULLSCREEN)
     else:
-        WIDTH = 800
-        HEIGHT = 600
+        WIDTH = 1400
+        HEIGHT = 1050
         screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
 
     if use_opengl:
