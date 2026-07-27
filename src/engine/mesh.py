@@ -12,6 +12,9 @@ class Mesh:
         self.colour = colour
         self.position = position
         self.texcoords = texcoords  # list of (u, v) pairs matching vertices
+        # Pre-computed flattened vertex data for GPU upload (set externally)
+        self._vertex_data = None
+        self._vertex_count = 0
 
 
 def create_prism(

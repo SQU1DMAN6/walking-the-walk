@@ -108,161 +108,295 @@ def generate_terrain(
 
 # ── Trees (Eucalyptus-style) ─────────────────────────────────────────
 
-def create_tree(position, seed, height=4.0, trunk_radius=0.12):
-    """Create a eucalyptus-style tree.
+def _create_foliage_cluster(position, rx, ry, rz, colour):
+    """Create a single foliage cluster as a low-poly blob (14 triangles).
 
-    The trunk is tall and thin. Above the trunk, a crown of
-    6 triangle pairs (12 triangles) forms the canopy.
-    4 thin branch triangles connect the trunk to the crown.
+    Uses an octahedron with randomised axis lengths so each cluster
+    has a slightly different shape. Adds extra detail faces for
+    a more organic look.
+    """
+    verts = [
+        (0.0, ry, 0.0),         # 0: top
+        (rx * 0.7, ry * 0.3, rx * 0.7),  # 1: upper quadrant
+        (-rx * 0.7, ry * 0.3, rx * 0.7), # 2
+        (-rx * 0.7, ry * 0.3, -rx * 0.7),# 3
+        (rx * 0.7, ry * 0.3, -rx * 0.7), # 4
+        (rx, 0.0, 0.0),         # 5: mid ring
+        (0.0, 0.0, rz),         # 6
+        (-rx, 0.0, 0.0),        # 7
+        (0.0, 0.0, -rz),        # 8
+        (rx * 0.5, -ry * 0.3, rx * 0.5), # 9: lower ring
+        (-rx * 0.5, -ry * 0.3, rx * 0.5),# 10
+        (-rx * 0.5, -ry * 0.3, -rx * 0.5),# 11
+        (rx * 0.5, -ry * 0.3, -rx * 0.5),# 12
+        (0.0, -ry * 0.4, 0.0),  # 13: bottom
+    ]
 
-    Total triangles: trunk (12) + branches (4) + crown (12) = 28
-    which is within the 28-triangle limit for the whole tree.
+    faces = [
+        # Apex to upper ring (4 triangles)
+        (0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1),
+        # Upper ring to mid ring (8 triangles = 4 quads)
+        (1, 5, 6), (1, 6, 2),
+        (2, 6, 7), (2, 7, 3),
+        (3, 7, 8), (3, 8, 4),
+        (4, 8, 5), (4, 5, 1),
+        # Mid ring to lower ring (8 triangles = 4 quads)
+        (5, 9, 10), (5, 10, 6),
+        (6, 10, 11), (6, 11, 7),
+        (7, 11, 12), (7, 12, 8),
+        (8, 12, 9), (8, 9, 5),
+        # Lower ring to bottom (4 triangles)
+        (9, 13, 10), (10, 13, 11), (11, 13, 12), (12, 13, 9),
+    ]
+
+    return Mesh(verts, faces, colour, position)
+
+
+def _create_branch(start, end, width, colour):
+    """Create a 6-triangle branch from start to end.
+
+    Uses a triangular prism cross-section for thickness and visible
+    branch structure. The branch has a top edge and two bottom edges
+    so it looks like a rounded/angular stick.
+    """
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    dz = end[2] - start[2]
+    length = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if length < 0.001:
+        return None
+
+    # Direction of the branch (normalised)
+    nx, ny, nz = dx / length, dy / length, dz / length
+
+    # Compute two perpendicular vectors for the triangular cross-section
+    # First perpendicular: cross with world up (or X if vertical)
+    if abs(ny) > 0.9:
+        px, py, pz = 1.0, 0.0, 0.0
+    else:
+        px, py, pz = 0.0, 1.0, 0.0
+
+    # perp1 = dir × up
+    wx = ny * pz - nz * py
+    wy = nz * px - nx * pz
+    wz = nx * py - ny * px
+    wlen = math.sqrt(wx * wx + wy * wy + wz * wz)
+    if wlen < 0.001:
+        return None
+    wx /= wlen
+    wy /= wlen
+    wz /= wlen
+
+    # perp2 = dir × perp1  (creates a triangle cross-section)
+    vx = ny * wz - nz * wy
+    vy = nz * wx - nx * wz
+    vz = nx * wy - ny * wx
+
+    hw = width * 0.5
+    # Three vertices at start, three at end (triangular prism)
+    # Triangle points: one top, two bottom
+    verts = [
+        (start[0] + wx * hw, start[1] + wy * hw, start[2] + wz * hw),       # 0: start top
+        (start[0] + vx * hw * 0.866 - wx * hw * 0.5,                          # 1: start bottom-left
+         start[1] + vy * hw * 0.866 - wy * hw * 0.5,
+         start[2] + vz * hw * 0.866 - wz * hw * 0.5),
+        (start[0] - vx * hw * 0.866 - wx * hw * 0.5,                          # 2: start bottom-right
+         start[1] - vy * hw * 0.866 - wy * hw * 0.5,
+         start[2] - vz * hw * 0.866 - wz * hw * 0.5),
+        (end[0] + wx * hw, end[1] + wy * hw, end[2] + wz * hw),               # 3: end top
+        (end[0] + vx * hw * 0.866 - wx * hw * 0.5,                            # 4: end bottom-left
+         end[1] + vy * hw * 0.866 - wy * hw * 0.5,
+         end[2] + vz * hw * 0.866 - wz * hw * 0.5),
+        (end[0] - vx * hw * 0.866 - wx * hw * 0.5,                            # 5: end bottom-right
+         end[1] - vy * hw * 0.866 - wy * hw * 0.5,
+         end[2] - vz * hw * 0.866 - wz * hw * 0.5),
+    ]
+
+    # 6 triangles: 3 side faces + 2 end caps (not rendered) + tube quads split
+    faces = [
+        # Side faces (3 quads = 6 triangles)
+        (0, 3, 4), (0, 4, 1),  # top side
+        (0, 2, 5), (0, 5, 3),  # bottom side 1
+        (1, 4, 5), (1, 5, 2),  # bottom side 2
+    ]
+
+    return Mesh(verts, faces, colour, position=(0, 0, 0))
+
+
+def create_tree(position, seed, base_height=4.0):
+    """Create an Australian eucalyptus-style tree.
+
+    Structure:
+        trunk (thick, dominant, 25-40% of total height)
+        + 5-10 major branches extending outward
+        + 6-14 foliage clusters at branch tips
+
+    Design principles (per SPEC_2026-07-27.md):
+        - irregular silhouette
+        - sparse canopy with 30-60% negative space
+        - visible trunk structure
+        - asymmetrical branch distribution
+        - flattened/rounded crown (not a cone)
 
     Returns:
-        trunk_mesh, canopy_mesh — two Mesh objects with different colours.
+        list of Mesh objects: [trunk, branch_1, ..., branch_n,
+                               cluster_1, ..., cluster_n]
     """
     rng = random.Random(seed)
-    h_var = rng.uniform(0.7, 1.3)
-    height *= h_var
-    trunk_h = height * 0.55
-    crown_r = rng.uniform(0.8, 2.5)
-    crown_h = rng.uniform(1.0, 3.5)
+
+    # ── Tree dimensions ────────────────────────────────────────────
+    # Larger size variation: some trees massive, some small
+    h_var = rng.uniform(1, 3.5)
+    height = base_height * h_var
+    trunk_h = height * rng.uniform(0.25, 0.40)  # 25-40% of total
+    trunk_base_r = rng.uniform(0.15, 0.40)       # thicker trunk
+    trunk_top_r = trunk_base_r * rng.uniform(0.4, 0.7)
+
+    # Slight lean for the trunk
+    lean_angle = rng.uniform(-0.08, 0.08)
+    lean_x = math.sin(lean_angle) * trunk_h
+    lean_z = math.cos(lean_angle) * trunk_h - trunk_h
 
     trunk_colour = (110, 85, 55)
+    branch_colour = (120, 90, 60)
     # Olive/grey-green eucalyptus foliage
-    canopy_colour = (
-        int(rng.uniform(60, 100)),
-        int(rng.uniform(100, 150)),
-        int(rng.uniform(40, 70)),
+    canopy_base = (
+        rng.uniform(60, 100),
+        rng.uniform(100, 150),
+        rng.uniform(40, 70),
     )
 
-    tr = trunk_radius
-    # Trunk: 4-sided prism
+    meshes = []
+
+    # ── Trunk: 4-sided prism, tapered ──────────────────────────────
+    tb = trunk_base_r
+    tt = trunk_top_r
+    lx = lean_x
+    lz = lean_z
+
     trunk_verts = [
-        (-tr, 0.0, -tr),
-        ( tr, 0.0, -tr),
-        ( tr, 0.0,  tr),
-        (-tr, 0.0,  tr),
-        (-tr * 0.7, trunk_h * 0.7, -tr * 0.7),
-        ( tr * 0.7, trunk_h * 0.7, -tr * 0.7),
-        ( tr * 0.7, trunk_h * 0.7,  tr * 0.7),
-        (-tr * 0.7, trunk_h * 0.7,  tr * 0.7),
-        (-tr * 0.4, trunk_h, -tr * 0.4),
-        ( tr * 0.4, trunk_h, -tr * 0.4),
-        ( tr * 0.4, trunk_h,  tr * 0.4),
-        (-tr * 0.4, trunk_h,  tr * 0.4),
+        (-tb, 0.0, -tb),   # 0
+        ( tb, 0.0, -tb),   # 1
+        ( tb, 0.0,  tb),   # 2
+        (-tb, 0.0,  tb),   # 3
+        (-tt + lx, trunk_h * 0.5, -tt + lz),  # 4: mid ring
+        ( tt + lx, trunk_h * 0.5, -tt + lz),  # 5
+        ( tt + lx, trunk_h * 0.5,  tt + lz),  # 6
+        (-tt + lx, trunk_h * 0.5,  tt + lz),  # 7
+        (-tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),  # 8: top ring
+        ( tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),  # 9
+        ( tt * 0.7 + lx, trunk_h,  tt * 0.7 + lz),  # 10
+        (-tt * 0.7 + lx, trunk_h,  tt * 0.7 + lz),  # 11
     ]
-    # Two stacked segments for the trunk (8 triangles top + 8 bottom = 16,
-    # but we'll use 12 to keep it simple: just 2 open-top segments)
     trunk_faces = [
         # Bottom segment
-        (0,1,2),(0,2,3),
-        (0,4,5),(0,5,1),
-        (1,5,6),(1,6,2),
-        (2,6,7),(2,7,3),
-        (3,7,4),(3,4,0),
+        (0, 1, 2), (0, 2, 3),
+        (0, 4, 5), (0, 5, 1),
+        (1, 5, 6), (1, 6, 2),
+        (2, 6, 7), (2, 7, 3),
+        (3, 7, 4), (3, 4, 0),
         # Top segment
-        (4,5,6),(4,6,7),
-        (4,8,9),(4,9,5),
-        (5,9,10),(5,10,6),
-        (6,10,11),(6,11,7),
-        (7,11,8),(7,8,4),
+        (4, 5, 6), (4, 6, 7),
+        (4, 8, 9), (4, 9, 5),
+        (5, 9, 10), (5, 10, 6),
+        (6, 10, 11), (6, 11, 7),
+        (7, 11, 8), (7, 8, 4),
         # Cap the top
-        (8,9,10),(8,10,11),
+        (8, 9, 10), (8, 10, 11),
     ]
 
-    # Branches: 4 thin triangles radiating from trunk top
-    branch_len = crown_r * 0.6
-    branch_h = trunk_h + crown_h * 0.15
-    branch_verts = [
-        # Branch 1 (positive X)
-        (tr * 0.4, trunk_h, 0.0),
-        (branch_len, trunk_h + 0.1, 0.0),
-        (branch_len * 0.5, trunk_h + 0.3, 0.0),
-        # Branch 2 (negative X)
-        (-tr * 0.4, trunk_h, 0.0),
-        (-branch_len, trunk_h + 0.1, 0.0),
-        (-branch_len * 0.5, trunk_h + 0.3, 0.0),
-        # Branch 3 (positive Z)
-        (0.0, trunk_h, tr * 0.4),
-        (0.0, trunk_h + 0.1, branch_len),
-        (0.0, trunk_h + 0.3, branch_len * 0.5),
-        # Branch 4 (negative Z)
-        (0.0, trunk_h, -tr * 0.4),
-        (0.0, trunk_h + 0.1, -branch_len),
-        (0.0, trunk_h + 0.3, -branch_len * 0.5),
-    ]
-    branch_faces = [
-        (0, 1, 2),
-        (3, 5, 4),
-        (6, 7, 8),
-        (9, 11, 10),
-    ]
+    trunk_mesh = Mesh(trunk_verts, trunk_faces, trunk_colour, position)
+    meshes.append(trunk_mesh)
 
-    # Crown: ~60-triangle canopy with 12 radial segments and 3 rings
-    # for a more tree-like, rounded appearance.
-    crown_segments = 12
-    crown_base_y = trunk_h + crown_h * 0.2
-    crown_mid_y = trunk_h + crown_h * 0.55
-    crown_top_y = trunk_h + crown_h
+    # ── Branches ───────────────────────────────────────────────────
+    num_branches = rng.randint(3, 8)
+    branch_tips = []
 
-    crown_verts = [(0.0, crown_top_y, 0.0)]  # 0: apex
-    crown_texcoords = [(0.5, 0.5)]  # apex texcoord
+    for i in range(num_branches):
+        # Branch height on trunk (spread from low-mid to top)
+        bh = trunk_h * rng.uniform(0.3, 0.95)
 
-    # Generate rings: upper, lower, skirt
-    ring_radii = [0.45, 0.75, 1.0]
-    ring_heights = [crown_mid_y, crown_base_y, crown_base_y - 0.4]
-    for ri in range(3):
-        r = ring_radii[ri] * crown_r
-        h = ring_heights[ri]
-        for si in range(crown_segments):
-            angle = (2.0 * math.pi * si) / crown_segments
-            x = r * math.cos(angle)
-            z = r * math.sin(angle)
-            crown_verts.append((x, h, z))
-            crown_texcoords.append((si / crown_segments, 0.2 + 0.8 * (ri / 3)))
+        # Random horizontal direction
+        yaw = rng.uniform(0, 2.0 * math.pi)
+        # Upward angle (15-65 degrees from horizontal)
+        pitch = rng.uniform(0.25, 1.15)
 
-    crown_faces = []
-    # Apex to upper ring (12 triangles)
-    for si in range(crown_segments):
-        s0 = 1 + si
-        s1 = 1 + (si + 1) % crown_segments
-        crown_faces.append((0, s0, s1))
+        # Branch length relative to crown size
+        crown_r = rng.uniform(0.8, 3.0)
+        branch_len = crown_r * rng.uniform(0.3, 0.6)
 
-    # Upper ring to lower ring (24 triangles = 12 quads)
-    upper_start = 1
-    lower_start = 1 + crown_segments
-    for si in range(crown_segments):
-        s0 = upper_start + si
-        s1 = upper_start + (si + 1) % crown_segments
-        s2 = lower_start + si
-        s3 = lower_start + (si + 1) % crown_segments
-        crown_faces.append((s0, s2, s3))
-        crown_faces.append((s0, s3, s1))
+        # Calculate end position
+        end_x = position[0] + math.cos(yaw) * math.cos(pitch) * branch_len
+        end_y = position[1] + bh + math.sin(pitch) * branch_len
+        end_z = position[2] + math.sin(yaw) * math.cos(pitch) * branch_len
 
-    # Lower ring to skirt (24 triangles = 12 quads)
-    skirt_start = 1 + 2 * crown_segments
-    for si in range(crown_segments):
-        s0 = lower_start + si
-        s1 = lower_start + (si + 1) % crown_segments
-        s2 = skirt_start + si
-        s3 = skirt_start + (si + 1) % crown_segments
-        crown_faces.append((s0, s2, s3))
-        crown_faces.append((s0, s3, s1))
+        # Start position (on trunk surface)
+        t = bh / trunk_h
+        r_at_h = trunk_base_r + (trunk_top_r - trunk_base_r) * t
+        start_x = position[0] + math.cos(yaw) * r_at_h * 0.8 + lx * t
+        start_y = position[1] + bh
+        start_z = position[2] + math.sin(yaw) * r_at_h * 0.8 + lz * t
 
-    # Combine into separate meshes so colours are correct
-    trunk_combined_verts = trunk_verts + branch_verts
-    trunk_face_count = len(trunk_faces)
-    branch_offset = len(trunk_verts)
-    combined_trunk_faces = (
-        trunk_faces
-        + [(i0 + branch_offset, i1 + branch_offset, i2 + branch_offset)
-           for (i0, i1, i2) in branch_faces]
-    )
+        start = (start_x, start_y, start_z)
+        end = (end_x, end_y, end_z)
 
-    trunk_mesh = Mesh(trunk_combined_verts, combined_trunk_faces, trunk_colour, position)
-    canopy_mesh = Mesh(crown_verts, crown_faces, canopy_colour, position, texcoords=crown_texcoords)
-    return trunk_mesh, canopy_mesh
+        branch_width = rng.uniform(0.06, 0.18)  # thicker branches
+        branch_mesh = _create_branch(start, end, branch_width, branch_colour)
+        if branch_mesh:
+            meshes.append(branch_mesh)
+
+        # Store tip for foliage
+        branch_tips.append(end)
+
+        # Occasionally add a secondary branch fork (more often)
+        if rng.random() < 0.4 and len(branch_tips) < 8:
+            fork_yaw = yaw + rng.uniform(-0.6, 0.6)
+            fork_pitch = pitch + rng.uniform(-0.3, 0.3)
+            fork_len = branch_len * rng.uniform(0.3, 0.7)
+            fork_end_x = end_x + math.cos(fork_yaw) * math.cos(fork_pitch) * fork_len
+            fork_end_y = end_y + math.sin(fork_pitch) * fork_len
+            fork_end_z = end_z + math.sin(fork_yaw) * math.cos(fork_pitch) * fork_len
+            fork_end = (fork_end_x, fork_end_y, fork_end_z)
+            fork_mesh = _create_branch(
+                end, fork_end, branch_width * 0.7, branch_colour
+            )
+            if fork_mesh:
+                meshes.append(fork_mesh)
+            branch_tips.append(fork_end)
+
+    # ── Foliage clusters ───────────────────────────────────────────
+    num_clusters = rng.randint(1, 2)
+
+    # Place clusters at branch tips, plus extras scattered in canopy volume
+    cluster_positions = list(branch_tips)
+
+    # Add extra clusters
+    crown_radius = rng.uniform(0.8, 3.0)
+    for _ in range(num_clusters - len(cluster_positions)):
+        ca = rng.uniform(0, 2.0 * math.pi)
+        cd = rng.uniform(0, crown_radius * 0.8)
+        ch = rng.uniform(0, trunk_h * 0.6)
+        cx = position[0] + math.cos(ca) * cd
+        cy = position[1] + trunk_h * 0.4 + ch
+        cz = position[2] + math.sin(ca) * cd
+        cluster_positions.append((cx, cy, cz))
+
+    for cpos in cluster_positions:
+        # Larger clusters
+        cluster_r = rng.uniform(0.3, 0.9)
+        cluster_h = rng.uniform(0.3, 0.7)
+        # Slight colour variation per cluster
+        c_colour = (
+            int(canopy_base[0] + rng.uniform(-15, 15)),
+            int(canopy_base[1] + rng.uniform(-20, 20)),
+            int(canopy_base[2] + rng.uniform(-10, 10)),
+        )
+        cluster = _create_foliage_cluster(
+            cpos, cluster_r, cluster_h, cluster_r * rng.uniform(0.7, 1.3), c_colour
+        )
+        meshes.append(cluster)
+
+    return meshes
 
 
 # ── Bushes ────────────────────────────────────────────────────────────
@@ -406,12 +540,11 @@ def generate_world(seed=42, terrain_size=100, terrain_segments=30):
             continue
 
         tree_positions.append((tx, tz))
-        trunk, canopy = create_tree((tx, ty, tz), seed + i * 7)
-        meshes.append(trunk)
-        meshes.append(canopy)
+        tree_meshes = create_tree((tx, ty, tz), seed + i * 7)
+        meshes.extend(tree_meshes)
 
     # Spawn bushes
-    for i in range(80):
+    for i in range(240):
         bx = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
         bz = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
         by = get_terrain_height(bx, bz, seed, 1.5)
@@ -428,7 +561,7 @@ def generate_world(seed=42, terrain_size=100, terrain_segments=30):
         meshes.append(create_bush((bx, by, bz), seed + i * 13 + 1000))
 
     # Spawn rocks
-    for i in range(40):
+    for i in range(60):
         rx = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
         rz = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
         ry = get_terrain_height(rx, rz, seed, 1.5)
