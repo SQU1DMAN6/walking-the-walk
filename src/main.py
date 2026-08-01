@@ -64,7 +64,8 @@ HELP_TEXT = (
     "\nGoals:\n"
     "  Explore the Australian outback.\n"
     "  Hide from its wild animals.\n"
-    "  Discover its secrets.\n"
+    "  Discover its secrets.\n\n"
+    "Use F1 to close this Help message.\n"
 )
 
 # Pre-render help text surface
