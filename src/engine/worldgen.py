@@ -5,7 +5,7 @@ import random
 from engine.mesh import Mesh
 
 
-# ── Noise helpers ─────────────────────────────────────────────────────
+# Noise helpers
 
 def _hash(x, y, seed):
     """Simple deterministic hash for noise."""
@@ -59,7 +59,7 @@ def get_terrain_height(x, z, seed, height_scale=1.5):
     return h * height_scale - 2.0  # offset so player stands on it
 
 
-# ── Terrain ───────────────────────────────────────────────────────────
+# Terrain
 
 def generate_terrain(
     width,
@@ -106,7 +106,7 @@ def generate_terrain(
     return Mesh(vertices, faces, colour, (0, 0, 0))
 
 
-# ── Trees (Eucalyptus-style) ─────────────────────────────────────────
+# Trees (Eucalyptus-style)
 
 def _create_foliage_cluster(position, rx, ry, rz, colour):
     """Create a single foliage cluster as a low-poly blob (14 triangles).
@@ -244,7 +244,7 @@ def create_tree(position, seed, base_height=4.0):
     """
     rng = random.Random(seed)
 
-    # ── Tree dimensions ────────────────────────────────────────────
+    # Tree dimensions
     # Larger size variation: some trees massive, some small
     h_var = rng.uniform(1, 3.5)
     height = base_height * h_var
@@ -268,7 +268,7 @@ def create_tree(position, seed, base_height=4.0):
 
     meshes = []
 
-    # ── Trunk: 4-sided prism, tapered ──────────────────────────────
+    # Trunk: 4-sided prism, tapered
     tb = trunk_base_r
     tt = trunk_top_r
     lx = lean_x
@@ -308,7 +308,7 @@ def create_tree(position, seed, base_height=4.0):
     trunk_mesh = Mesh(trunk_verts, trunk_faces, trunk_colour, position)
     meshes.append(trunk_mesh)
 
-    # ── Branches ───────────────────────────────────────────────────
+    # Branches
     num_branches = rng.randint(3, 8)
     branch_tips = []
 
@@ -364,7 +364,7 @@ def create_tree(position, seed, base_height=4.0):
                 meshes.append(fork_mesh)
             branch_tips.append(fork_end)
 
-    # ── Foliage clusters ───────────────────────────────────────────
+    # Foliage clusters
     num_clusters = rng.randint(1, 2)
 
     # Place clusters at branch tips, plus extras scattered in canopy volume
@@ -399,7 +399,7 @@ def create_tree(position, seed, base_height=4.0):
     return meshes
 
 
-# ── Bushes ────────────────────────────────────────────────────────────
+# Bushes
 
 def create_bush(position, seed):
     """Create a low-poly bush mesh — spinifex-style tussock.
@@ -435,7 +435,7 @@ def create_bush(position, seed):
     return Mesh(verts, faces, colour, position)
 
 
-# ── Rocks ─────────────────────────────────────────────────────────────
+# Rocks
 
 def create_rock(position, seed):
     """Create a low-poly rock mesh — red/orange for outback."""
@@ -470,7 +470,7 @@ def create_rock(position, seed):
     return Mesh(verts, faces, colour, position)
 
 
-# ── Spinifex grass ────────────────────────────────────────────────────
+# Spinifex grass
 
 def create_spinifex(position, seed):
     """Small tufts of dry grass — 2 crossed quads (4 triangles)."""
@@ -499,11 +499,45 @@ def create_spinifex(position, seed):
     return Mesh(verts, faces, colour, position)
 
 
-# ── World generation ──────────────────────────────────────────────────
+# Discovery markers (exploration landmarks)
+
+def create_discovery(position, colour=(200, 180, 80)):
+    """A small glowing marker placed at a point of interest. The player
+    can stand near one and press E to collect it (ties into the journal)."""
+    r = 0.35
+    h = 0.9
+    verts = [
+        (0.0, h, 0.0),      # 0 top
+        (r, 0.0, 0.0),      # 1
+        (0.0, 0.0, r),      # 2
+        (-r, 0.0, 0.0),     # 3
+        (0.0, 0.0, -r),     # 4
+        (0.0, 0.05, 0.0),   # 5 base
+    ]
+    faces = [
+        (0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1),
+        (1, 5, 2), (2, 5, 3), (3, 5, 4), (4, 5, 1),
+    ]
+    return Mesh(verts, faces, colour, position)
+
+
+# World generation
 
 def generate_world(seed=42, terrain_size=100, terrain_segments=30):
-    """Generate a complete outback world scene."""
+    """Generate a complete outback world scene.
+
+    Returns a dict with:
+        meshes     - list of Mesh objects to render
+        obstacles  - list of (cx, cz, radius, height) collision circles
+                    (tree trunks and rocks the player cannot walk through)
+        discoveries - list of dicts describing collectible landmarks
+                    {x, z, y, name, category, description}
+    """
     rng = random.Random(seed)
+    result = {"meshes": [], "obstacles": [], "discoveries": []}
+    meshes = result["meshes"]
+    obstacles = result["obstacles"]
+    discoveries = result["discoveries"]
 
     # Terrain colours: bright red/orange Australian outback palette
     r_base = rng.randint(200, 240)
@@ -517,7 +551,7 @@ def generate_world(seed=42, terrain_size=100, terrain_segments=30):
         colour=terrain_colour,
     )
 
-    meshes = [terrain]
+    meshes.append(terrain)
 
     # Spawn trees
     tree_positions = []
@@ -543,6 +577,9 @@ def generate_world(seed=42, terrain_size=100, terrain_segments=30):
         tree_meshes = create_tree((tx, ty, tz), seed + i * 7)
         meshes.extend(tree_meshes)
 
+        # Trunk collision circle for the tree
+        obstacles.append((tx, tz, 0.7, 4.0))
+
     # Spawn bushes
     for i in range(240):
         bx = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
@@ -567,6 +604,7 @@ def generate_world(seed=42, terrain_size=100, terrain_segments=30):
         ry = get_terrain_height(rx, rz, seed, 1.5)
 
         meshes.append(create_rock((rx, ry, rz), seed + i * 19 + 2000))
+        obstacles.append((rx, rz, 0.5, 1.2))
 
     # Spawn spinifex grass tufts
     for i in range(120):
@@ -585,4 +623,66 @@ def generate_world(seed=42, terrain_size=100, terrain_segments=30):
 
         meshes.append(create_spinifex((sx, sy, sz), seed + i * 31 + 3000))
 
-    return meshes
+    # Discovery landmarks (exploration objective)
+    discovery_defs = [
+        {
+            "name": "Uluru Rock",
+            "category": "Landmark",
+            "description": "A weathered sandstone monolith sacred to the "
+                           "Anangu people of Central Australia.",
+        },
+        {
+            "name": "River Red Gum",
+            "category": "Flora",
+            "description": "A massive eucalyptus that grows beside "
+                           "watercourses across the outback.",
+        },
+        {
+            "name": "Spinifex Grass",
+            "category": "Flora",
+            "description": "A hardy, drought-resistant grass that covers "
+                           "vast areas of inland Australia.",
+        },
+        {
+            "name": "Coolabah Tree",
+            "category": "Flora",
+            "description": "A tree of the arid interior, often found "
+                           "growing in claypans and near waterholes.",
+        },
+        {
+            "name": "Desert Oak",
+            "category": "Flora",
+            "description": "A slow-growing tree with needle-like foliage, "
+                           "common to the spinifex country of the outback.",
+        },
+    ]
+
+    discovery_colours = [
+        (210, 190, 80),
+        (170, 220, 90),
+        (200, 200, 60),
+        (120, 180, 120),
+        (160, 200, 110),
+    ]
+
+    for i, ddef in enumerate(discovery_defs):
+        # Place each discovery at a distinct, reachable spot
+        dx = rng.uniform(-terrain_size/2 + 6, terrain_size/2 - 6)
+        dz = rng.uniform(-terrain_size/2 + 6, terrain_size/2 - 6)
+        dy = get_terrain_height(dx, dz, seed, 1.5)
+        meshes.append(
+            create_discovery(
+                (dx, dy, dz),
+                colour=discovery_colours[i % len(discovery_colours)],
+            )
+        )
+        discoveries.append({
+            "x": dx,
+            "z": dz,
+            "y": dy,
+            "name": ddef["name"],
+            "category": ddef["category"],
+            "description": ddef["description"],
+        })
+
+    return result

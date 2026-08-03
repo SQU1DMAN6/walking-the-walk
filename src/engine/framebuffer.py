@@ -26,4 +26,3 @@ class Framebuffer:
             self.surface,
             (0, 0)
         )
-

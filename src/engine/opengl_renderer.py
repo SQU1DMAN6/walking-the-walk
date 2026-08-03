@@ -7,6 +7,7 @@ except Exception:
     HAS_OPENGL = False
     print("No OpenGL :(")
 
+import ctypes
 import math
 import random
 
@@ -68,7 +69,7 @@ def _generate_leaf_texture(size=64):
                 alpha_noise = 0.85 + 0.15 * math.sin(u * 50 + v * 45) * math.cos(v * 35 - u * 40)
                 pixels[idx + 3] = int(min(255, max_coverage * 255 * alpha_noise))
             else:
-                pixels[idx:idx+4] = b'\x00\x00\x00\x00'
+                pixels[idx:idx + 4] = b'\x00\x00\x00\x00'
 
     tex_id = gl.glGenTextures(1)
     gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
@@ -82,19 +83,39 @@ def _generate_leaf_texture(size=64):
     return tex_id
 
 
+def _face_normal(v0, v1, v2):
+    """Compute the normal (in object space) of a triangle."""
+    ux = v1[0] - v0[0]
+    uy = v1[1] - v0[1]
+    uz = v1[2] - v0[2]
+    wx = v2[0] - v0[0]
+    wy = v2[1] - v0[1]
+    wz = v2[2] - v0[2]
+    nx = uy * wz - uz * wy
+    ny = uz * wx - ux * wz
+    nz = ux * wy - uy * wx
+    nl = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if nl < 1e-9:
+        return (0.0, 1.0, 0.0)
+    return (nx / nl, ny / nl, nz / nl)
+
+
 def _build_vertex_data(mesh):
-    """Pre-compute flattened vertex data for a mesh (cached)."""
+    """Pre-compute flattened, world-space vertex data with real per-face
+    normals. Cached on the mesh; the world is static so this is baked once."""
     if mesh._vertex_data is not None:
         return mesh._vertex_data, mesh._vertex_count
 
     data = []
     for face in mesh.faces:
+        i0, i1, i2 = face
+        n = _face_normal(mesh.vertices[i0], mesh.vertices[i1], mesh.vertices[i2])
         for idx in face:
             vx, vy, vz = mesh.vertices[idx]
             wx = vx + mesh.position[0]
             wy = vy + mesh.position[1]
             wz = vz + mesh.position[2]
-            data.extend([wx, wy, wz, 0.0, 1.0, 0.0])
+            data.extend([wx, wy, wz, n[0], n[1], n[2]])
             if mesh.texcoords:
                 data.extend(mesh.texcoords[idx])
             else:
@@ -105,24 +126,78 @@ def _build_vertex_data(mesh):
     return mesh._vertex_data, mesh._vertex_count
 
 
-class BatchGroup:
-    """A group of meshes with the same colour, combined into one VBO."""
-    __slots__ = ('colour', 'use_texture', 'vertex_data', 'vertex_count')
+def _mesh_bake(mesh):
+    """Return flattened object-space per-triangle arrays for dynamic meshes:
+    (vertices, normals, texcoords). Cached on the mesh."""
+    cache = getattr(mesh, '_bake_cache', None)
+    if cache is not None:
+        return cache
 
-    def __init__(self, colour, use_texture, vertex_data, vertex_count):
+    verts = []
+    norms = []
+    uvs = []
+    for face in mesh.faces:
+        i0, i1, i2 = face
+        n = _face_normal(mesh.vertices[i0], mesh.vertices[i1], mesh.vertices[i2])
+        for idx in face:
+            verts.extend(mesh.vertices[idx])
+            norms.extend(n)
+            if mesh.texcoords:
+                uvs.extend(mesh.texcoords[idx])
+            else:
+                uvs.extend((0.0, 0.0))
+
+    cache = (verts, norms, uvs)
+    mesh._bake_cache = cache
+    return cache
+
+
+def _transform_dynamic(mesh, x, y, z, yaw=0.0):
+    """Build world-space flattened data from an object-space mesh bake,
+    applying a Y-axis rotation (yaw) and translation. Result layout:
+    [pos xyz, normal xyz, uv xy] per vertex."""
+    verts, norms, uvs = _mesh_bake(mesh)
+    cy = math.cos(yaw)
+    sy = math.sin(yaw)
+
+    out = []
+    vcount = len(verts) // 3
+    for i in range(vcount):
+        vx = verts[i * 3]
+        vy = verts[i * 3 + 1]
+        vz = verts[i * 3 + 2]
+        # rotate around Y
+        rx = vx * cy + vz * sy
+        rz = -vx * sy + vz * cy
+        out.extend([rx + x, vy + y, rz + z])
+
+        nx, ny, nz = norms[i * 3], norms[i * 3 + 1], norms[i * 3 + 2]
+        nrx = nx * cy + nz * sy
+        nrz = -nx * sy + nz * cy
+        out.extend([nrx, ny, nrz])
+
+        out.extend([uvs[i * 2], uvs[i * 2 + 1]])
+    return out
+
+
+class BatchGroup:
+    """A group of meshes with the same colour, combined into one persistent VBO.
+    The vertex data is uploaded to the GPU exactly once at build time."""
+    __slots__ = ('colour', 'use_texture', 'vertex_data', 'vertex_count', 'vbo')
+
+    def __init__(self, colour, use_texture, vertex_data, vertex_count, vbo):
         self.colour = colour
         self.use_texture = use_texture
         self.vertex_data = vertex_data
         self.vertex_count = vertex_count
+        self.vbo = vbo
 
 
 def build_batches(meshes):
-    """Group meshes by colour and combine into batch VBOs.
-
-    Returns a list of BatchGroup objects, one per unique colour.
-    This reduces draw calls from ~1000+ to ~50-100.
-    """
-    groups = {}  # key: (colour_tuple, use_texture) -> list of vertex_data lists
+    """Group meshes by colour, compute real per-face normals and bake each
+    group into a single persistent VBO. Returns a list of BatchGroup objects,
+    one per unique colour. This makes all static geometry GPU-resident."""
+    groups = {}
 
     for mesh in meshes:
         vd, vc = _build_vertex_data(mesh)
@@ -135,14 +210,21 @@ def build_batches(meshes):
 
     batches = []
     for (colour, use_texture), data_list in groups.items():
-        # Concatenate all vertex data
         total_len = sum(len(d) for d in data_list)
         combined = [0.0] * total_len
         offset = 0
         for d in data_list:
             combined[offset:offset + len(d)] = d
             offset += len(d)
-        batches.append(BatchGroup(colour, use_texture, combined, total_len // 8))
+
+        # Upload once to a dedicated VBO (static draw)
+        vbo = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
+        arr = (gl.GLfloat * len(combined))(*combined)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STATIC_DRAW)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+
+        batches.append(BatchGroup(colour, use_texture, combined, len(combined) // 8, vbo))
 
     return batches
 
@@ -155,8 +237,12 @@ class OpenGLRenderer:
         self.near = 0.1
         self.far = 200.0
 
+        # One VBO used for dynamic (moving) geometry uploads
         self.vao = gl.glGenVertexArrays(1)
-        self.vbo = gl.glGenBuffers(1)
+        self.dynamic_vbo = gl.glGenBuffers(1)
+
+        # Per-batch uniform block location caching
+        self._batch_data = []  # (vbo, vertex_count)
 
         vertex_src = """
         #version 330 core
@@ -177,6 +263,7 @@ class OpenGLRenderer:
 
         out vec3 v_normal;
         out vec2 v_texcoord;
+        out float v_viewz;
 
         void main() {
             vec3 rel = in_pos - u_cam_pos;
@@ -197,6 +284,7 @@ class OpenGLRenderer:
             gl_Position = vec4(ndc_x / z, ndc_y / z, clip_z / z, 1.0);
             v_normal = normalize(vec3(nrx, nry, nrz2));
             v_texcoord = in_texcoord;
+            v_viewz = z;
         }
         """
 
@@ -209,8 +297,14 @@ class OpenGLRenderer:
         uniform bool u_use_texture;
         uniform sampler2D u_texture;
 
+        // Distance fog (atmospheric depth, outback haze)
+        uniform vec3 u_fog_color;
+        uniform float u_fog_near;
+        uniform float u_fog_far;
+
         in vec3 v_normal;
         in vec2 v_texcoord;
+        in float v_viewz;
 
         out vec4 f_col;
 
@@ -225,8 +319,13 @@ class OpenGLRenderer:
                 base = mix(base, texel.rgb, texel.a * 0.8);
             }
 
-            f_col = vec4(base * lit, 1.0);
-            if (f_col.r < 0.01 && f_col.g < 0.01 && f_col.b < 0.01) discard;
+            vec3 final_col = base * lit;
+            if (final_col.r < 0.01 && final_col.g < 0.01 && final_col.b < 0.01) discard;
+
+            // Blend into the warm outback haze with distance
+            float fog = clamp((v_viewz - u_fog_near) / (u_fog_far - u_fog_near), 0.0, 1.0);
+            final_col = mix(final_col, u_fog_color, fog);
+            f_col = vec4(final_col, 1.0);
         }
         """
 
@@ -264,25 +363,25 @@ class OpenGLRenderer:
         self.sin_yaw_loc = gl.glGetUniformLocation(self.shader, "u_sin_yaw")
         self.cos_pitch_loc = gl.glGetUniformLocation(self.shader, "u_cos_pitch")
         self.sin_pitch_loc = gl.glGetUniformLocation(self.shader, "u_sin_pitch")
+        self.fog_color_loc = gl.glGetUniformLocation(self.shader, "u_fog_color")
+        self.fog_near_loc = gl.glGetUniformLocation(self.shader, "u_fog_near")
+        self.fog_far_loc = gl.glGetUniformLocation(self.shader, "u_fog_far")
 
         self.leaf_tex_id = _generate_leaf_texture(64)
 
-        # World-space sun direction (normalised)
+        # Warm outback sun direction (world space, normalised)
         sun_dir = (0.4, -0.8, 0.4)
-        sd_len = math.sqrt(sun_dir[0]**2 + sun_dir[1]**2 + sun_dir[2]**2)
+        sd_len = math.sqrt(sun_dir[0] ** 2 + sun_dir[1] ** 2 + sun_dir[2] ** 2)
         self.sun_world = (sun_dir[0] / sd_len, sun_dir[1] / sd_len, sun_dir[2] / sd_len)
 
-    def render_frame(self, camera, batches):
-        """Render all batches in one frame.
+        # Warm outback haze colour
+        self.fog_color = (0.82, 0.66, 0.48)
+        self.fog_near = 40.0
+        self.fog_far = 140.0
 
-        Sets camera uniforms ONCE, then draws each batch with its colour.
-        This is the main performance win: ~1000+ draw calls -> ~50-100.
-        """
-        import ctypes
+        self._stride = 8 * 4
 
-        gl.glUseProgram(self.shader)
-
-        # --- Camera uniforms (set once per frame) ---
+    def _set_camera_uniforms(self, camera):
         cy = math.cos(camera.yaw)
         sy = math.sin(camera.yaw)
         cp = math.cos(-camera.pitch)
@@ -302,7 +401,6 @@ class OpenGLRenderer:
         rz2 = ly * sp + rz * cp
         gl.glUniform3f(self.light_dir_loc, rx, ry, rz2)
 
-        # Projection uniforms (constant)
         gl.glUniform1f(self.focal_loc, self.focal_length)
         gl.glUniform1f(self.w_loc, float(self.width))
         gl.glUniform1f(self.h_loc, float(self.height))
@@ -312,43 +410,82 @@ class OpenGLRenderer:
         gl.glUniform1f(self.ambient_loc, 0.35)
         gl.glUniform1f(self.diffuse_loc, 0.65)
 
+        # Fog
+        gl.glUniform3f(self.fog_color_loc, self.fog_color[0], self.fog_color[1], self.fog_color[2])
+        gl.glUniform1f(self.fog_near_loc, self.fog_near)
+        gl.glUniform1f(self.fog_far_loc, self.fog_far)
+
+    def _define_attribs(self, vbo):
+        """Bind a VBO and set the three vertex attribute pointers."""
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
+        gl.glEnableVertexAttribArray(0)
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(1)
+        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(3 * 4))
+        gl.glEnableVertexAttribArray(2)
+        gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(6 * 4))
+
+    def render_frame(self, camera, batches):
+        """Render all static batches. Camera uniforms are set once; each batch
+        is a persistent VBO that only needs binding + a colour uniform + a draw
+        call. All geometry is GPU-resident."""
+        gl.glUseProgram(self.shader)
+        self._set_camera_uniforms(camera)
+
         # Bind leaf texture once
         gl.glActiveTexture(gl.GL_TEXTURE0)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
         gl.glUniform1i(self.texture_loc, 0)
 
-        # Bind VAO and VBO once
         gl.glBindVertexArray(self.vao)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
 
-        stride = 8 * 4
-        gl.glEnableVertexAttribArray(0)
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, False, stride, ctypes.c_void_p(0))
-        gl.glEnableVertexAttribArray(1)
-        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, False, stride, ctypes.c_void_p(3 * 4))
-        gl.glEnableVertexAttribArray(2)
-        gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, False, stride, ctypes.c_void_p(6 * 4))
-
-        # --- Draw each batch ---
         for batch in batches:
             if batch.vertex_count == 0:
                 continue
 
-            # Upload batch vertex data
-            arr = (gl.GLfloat * len(batch.vertex_data))(*batch.vertex_data)
-            gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
+            self._define_attribs(batch.vbo)
 
-            # Set batch colour
             colour_array = (gl.GLfloat * 3)(batch.colour[0], batch.colour[1], batch.colour[2])
             gl.glUniform3fv(self.color_loc, 1, colour_array)
-
-            # Set texture flag
             gl.glUniform1i(self.use_texture_loc, 1 if batch.use_texture else 0)
 
-            # Draw
             gl.glDrawArrays(gl.GL_TRIANGLES, 0, batch.vertex_count)
 
-        # Cleanup
+        gl.glDisableVertexAttribArray(0)
+        gl.glDisableVertexAttribArray(1)
+        gl.glDisableVertexAttribArray(2)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindVertexArray(0)
+        gl.glUseProgram(0)
+
+    def render_mesh_dynamic(self, camera, mesh, x, y, z, yaw=0.0):
+        """Render a single moving mesh (e.g. an emu) by transforming it in
+        Python (rotating around Y and translating), uploading to the dynamic
+        VBO, and drawing. Used for a small number of animated entities."""
+        data = _transform_dynamic(mesh, x, y, z, yaw)
+        if not data:
+            return
+
+        gl.glUseProgram(self.shader)
+        self._set_camera_uniforms(camera)
+
+        gl.glActiveTexture(gl.GL_TEXTURE0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
+        gl.glUniform1i(self.texture_loc, 0)
+
+        gl.glBindVertexArray(self.vao)
+        self._define_attribs(self.dynamic_vbo)
+
+        arr = (gl.GLfloat * len(data))(*data)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
+
+        colour = mesh.colour
+        colour_array = (gl.GLfloat * 3)(colour[0], colour[1], colour[2])
+        gl.glUniform3fv(self.color_loc, 1, colour_array)
+        gl.glUniform1i(self.use_texture_loc, 1 if (mesh.texcoords is not None) else 0)
+
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, len(data) // 8)
+
         gl.glDisableVertexAttribArray(0)
         gl.glDisableVertexAttribArray(1)
         gl.glDisableVertexAttribArray(2)

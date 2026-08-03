@@ -8,4 +8,3 @@ class Vec3:
         return Vec3(
             self.x, self.y, self.z
         )
-

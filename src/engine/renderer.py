@@ -74,7 +74,7 @@ class Renderer:
             self.project(v)
             for v in transformed_vertices
         ]
-    
+
         triangles = []
 
         for face in mesh.faces:
