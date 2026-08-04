@@ -102,7 +102,11 @@ def _face_normal(v0, v1, v2):
 
 def _build_vertex_data(mesh):
     """Pre-compute flattened, world-space vertex data with real per-face
-    normals. Cached on the mesh; the world is static so this is baked once."""
+    normals and per-vertex colours. Cached on the mesh; the world is static
+    so this is baked once.
+
+    Layout per vertex: [pos xyz, normal xyz, uv xy, colour rgb] = 11 floats.
+    """
     if mesh._vertex_data is not None:
         return mesh._vertex_data, mesh._vertex_count
 
@@ -120,15 +124,21 @@ def _build_vertex_data(mesh):
                 data.extend(mesh.texcoords[idx])
             else:
                 data.extend([0.0, 0.0])
+            # Per-vertex colour (falls back to mesh colour)
+            if mesh.vertex_colours is not None:
+                c = mesh.vertex_colours[idx]
+                data.extend([c[0], c[1], c[2]])
+            else:
+                data.extend([mesh.colour[0], mesh.colour[1], mesh.colour[2]])
 
     mesh._vertex_data = data
-    mesh._vertex_count = len(data) // 8
+    mesh._vertex_count = len(data) // 11
     return mesh._vertex_data, mesh._vertex_count
 
 
 def _mesh_bake(mesh):
     """Return flattened object-space per-triangle arrays for dynamic meshes:
-    (vertices, normals, texcoords). Cached on the mesh."""
+    (vertices, normals, texcoords, colours). Cached on the mesh."""
     cache = getattr(mesh, '_bake_cache', None)
     if cache is not None:
         return cache
@@ -136,6 +146,7 @@ def _mesh_bake(mesh):
     verts = []
     norms = []
     uvs = []
+    cols = []
     for face in mesh.faces:
         i0, i1, i2 = face
         n = _face_normal(mesh.vertices[i0], mesh.vertices[i1], mesh.vertices[i2])
@@ -146,8 +157,12 @@ def _mesh_bake(mesh):
                 uvs.extend(mesh.texcoords[idx])
             else:
                 uvs.extend((0.0, 0.0))
+            if mesh.vertex_colours is not None:
+                cols.extend(mesh.vertex_colours[idx])
+            else:
+                cols.extend(mesh.colour)
 
-    cache = (verts, norms, uvs)
+    cache = (verts, norms, uvs, cols)
     mesh._bake_cache = cache
     return cache
 
@@ -155,8 +170,8 @@ def _mesh_bake(mesh):
 def _transform_dynamic(mesh, x, y, z, yaw=0.0):
     """Build world-space flattened data from an object-space mesh bake,
     applying a Y-axis rotation (yaw) and translation. Result layout:
-    [pos xyz, normal xyz, uv xy] per vertex."""
-    verts, norms, uvs = _mesh_bake(mesh)
+    [pos xyz, normal xyz, uv xy, colour rgb] per vertex."""
+    verts, norms, uvs, cols = _mesh_bake(mesh)
     cy = math.cos(yaw)
     sy = math.sin(yaw)
 
@@ -177,6 +192,7 @@ def _transform_dynamic(mesh, x, y, z, yaw=0.0):
         out.extend([nrx, ny, nrz])
 
         out.extend([uvs[i * 2], uvs[i * 2 + 1]])
+        out.extend([cols[i * 3], cols[i * 3 + 1], cols[i * 3 + 2]])
     return out
 
 
@@ -224,7 +240,7 @@ def build_batches(meshes):
         gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STATIC_DRAW)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
 
-        batches.append(BatchGroup(colour, use_texture, combined, len(combined) // 8, vbo))
+        batches.append(BatchGroup(colour, use_texture, combined, len(combined) // 11, vbo))
 
     return batches
 
@@ -241,6 +257,9 @@ class OpenGLRenderer:
         self.vao = gl.glGenVertexArrays(1)
         self.dynamic_vbo = gl.glGenBuffers(1)
 
+        # Cache of uploaded sprite textures keyed by id(surface)
+        self._sprite_tex_cache = {}
+
         # Per-batch uniform block location caching
         self._batch_data = []  # (vbo, vertex_count)
 
@@ -249,6 +268,7 @@ class OpenGLRenderer:
         layout (location = 0) in vec3 in_pos;
         layout (location = 1) in vec3 in_normal;
         layout (location = 2) in vec2 in_texcoord;
+        layout (location = 3) in vec3 in_color;
 
         uniform vec3 u_cam_pos;
         uniform float u_cos_yaw;
@@ -263,6 +283,7 @@ class OpenGLRenderer:
 
         out vec3 v_normal;
         out vec2 v_texcoord;
+        out vec3 v_color;
         out float v_viewz;
 
         void main() {
@@ -284,6 +305,7 @@ class OpenGLRenderer:
             gl_Position = vec4(ndc_x / z, ndc_y / z, clip_z / z, 1.0);
             v_normal = normalize(vec3(nrx, nry, nrz2));
             v_texcoord = in_texcoord;
+            v_color = in_color;
             v_viewz = z;
         }
         """
@@ -304,12 +326,14 @@ class OpenGLRenderer:
 
         in vec3 v_normal;
         in vec2 v_texcoord;
+        in vec3 v_color;
         in float v_viewz;
 
         out vec4 f_col;
 
         void main() {
-            vec3 base = u_color / 255.0;
+            // Per-vertex colour (baked into the VBO) overrides the uniform
+            vec3 base = v_color / 255.0;
             float diff = max(dot(normalize(v_normal), -u_light_dir), 0.0);
             float lit = u_ambient + u_diffuse * diff;
 
@@ -376,10 +400,12 @@ class OpenGLRenderer:
 
         # Warm outback haze colour
         self.fog_color = (0.82, 0.66, 0.48)
-        self.fog_near = 40.0
-        self.fog_far = 140.0
+        # Faint fog that fully fades before the chunk boundary (render
+        # distance 2 x chunk 40 = 80 units) to hide chunk pop-in.
+        self.fog_near = 25.0
+        self.fog_far = 70.0
 
-        self._stride = 8 * 4
+        self._stride = 11 * 4
 
     def _set_camera_uniforms(self, camera):
         cy = math.cos(camera.yaw)
@@ -387,7 +413,9 @@ class OpenGLRenderer:
         cp = math.cos(-camera.pitch)
         sp = math.sin(-camera.pitch)
 
-        gl.glUniform3f(self.cam_pos_loc, camera.x, camera.y, camera.z)
+        # Use the effective eye position (pivot + forward offset + head-bob)
+        ex, ey, ez = camera.eye_position()
+        gl.glUniform3f(self.cam_pos_loc, ex, ey, ez)
         gl.glUniform1f(self.cos_yaw_loc, cy)
         gl.glUniform1f(self.sin_yaw_loc, sy)
         gl.glUniform1f(self.cos_pitch_loc, cp)
@@ -416,7 +444,7 @@ class OpenGLRenderer:
         gl.glUniform1f(self.fog_far_loc, self.fog_far)
 
     def _define_attribs(self, vbo):
-        """Bind a VBO and set the three vertex attribute pointers."""
+        """Bind a VBO and set the four vertex attribute pointers."""
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
         gl.glEnableVertexAttribArray(0)
         gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(0))
@@ -424,6 +452,8 @@ class OpenGLRenderer:
         gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(3 * 4))
         gl.glEnableVertexAttribArray(2)
         gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(6 * 4))
+        gl.glEnableVertexAttribArray(3)
+        gl.glVertexAttribPointer(3, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(8 * 4))
 
     def render_frame(self, camera, batches):
         """Render all static batches. Camera uniforms are set once; each batch
@@ -454,6 +484,109 @@ class OpenGLRenderer:
         gl.glDisableVertexAttribArray(0)
         gl.glDisableVertexAttribArray(1)
         gl.glDisableVertexAttribArray(2)
+        gl.glDisableVertexAttribArray(3)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindVertexArray(0)
+        gl.glUseProgram(0)
+
+    def _surface_to_gl_texture(self, surface):
+        """Convert a pygame surface to an OpenGL texture (cached by id).
+
+        pygame Surfaces don't allow arbitrary attributes (they use __slots__),
+        so we cache the texture id in a dict keyed by id(surface) instead.
+        """
+        import pygame
+        key = id(surface)
+        tex_id = self._sprite_tex_cache.get(key)
+        if tex_id is not None:
+            return tex_id
+
+        data = pygame.image.tostring(surface, "RGBA", True)
+        tex_id = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA,
+                        surface.get_width(), surface.get_height(), 0,
+                        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, data)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        self._sprite_tex_cache[key] = tex_id
+        return tex_id
+
+    def render_billboard(self, camera, surface, x, y, z, width, height):
+        """Render a camera-facing textured quad (billboard) at (x, y, z).
+
+        The quad always faces the camera (billboarded around the Y axis).
+        """
+        import pygame
+        tex_id = self._surface_to_gl_texture(surface)
+
+        # Camera-facing orientation: the quad's normal points at the camera.
+        # We build the quad in camera space so it always faces the viewer.
+        # Compute the right vector in world space from the camera yaw.
+        cy = math.cos(camera.yaw)
+        sy = math.sin(camera.yaw)
+        # Right vector (perpendicular to forward, in the XZ plane)
+        rx = cy
+        rz = -sy
+
+        # Half extents
+        hw = width * 0.5
+        hh = height * 0.5
+
+        # Quad corners in world space (centred at x, y, z, facing camera)
+        # Bottom-left, bottom-right, top-right, top-left
+        corners = [
+            (x - rx * hw, y, z - rz * hw),
+            (x + rx * hw, y, z + rz * hw),
+            (x + rx * hw, y + hh, z + rz * hw),
+            (x - rx * hw, y + hh, z - rz * hw),
+        ]
+
+        # Build vertex data: pos xyz, normal (0,1,0), uv xy, colour rgb (white)
+        data = []
+        # Two triangles: (0,1,2) and (0,2,3)
+        for tri in ((0, 1, 2), (0, 2, 3)):
+            for idx in tri:
+                cx, cyy, cz = corners[idx]
+                data.extend([cx, cyy, cz, 0.0, 1.0, 0.0])
+                if idx == 0:
+                    data.extend([0.0, 0.0])
+                elif idx == 1:
+                    data.extend([1.0, 0.0])
+                elif idx == 2:
+                    data.extend([1.0, 1.0])
+                else:
+                    data.extend([0.0, 1.0])
+                data.extend([255.0, 255.0, 255.0])
+
+        gl.glUseProgram(self.shader)
+        self._set_camera_uniforms(camera)
+
+        # Bind the sprite texture
+        gl.glActiveTexture(gl.GL_TEXTURE0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
+        gl.glUniform1i(self.texture_loc, 0)
+
+        gl.glBindVertexArray(self.vao)
+        self._define_attribs(self.dynamic_vbo)
+
+        arr = (gl.GLfloat * len(data))(*data)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
+
+        # White base colour so the texture shows through fully
+        colour_array = (gl.GLfloat * 3)(255.0, 255.0, 255.0)
+        gl.glUniform3fv(self.color_loc, 1, colour_array)
+        gl.glUniform1i(self.use_texture_loc, 1)
+
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 6)
+
+        gl.glDisableVertexAttribArray(0)
+        gl.glDisableVertexAttribArray(1)
+        gl.glDisableVertexAttribArray(2)
+        gl.glDisableVertexAttribArray(3)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
@@ -484,11 +617,12 @@ class OpenGLRenderer:
         gl.glUniform3fv(self.color_loc, 1, colour_array)
         gl.glUniform1i(self.use_texture_loc, 1 if (mesh.texcoords is not None) else 0)
 
-        gl.glDrawArrays(gl.GL_TRIANGLES, 0, len(data) // 8)
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, len(data) // 11)
 
         gl.glDisableVertexAttribArray(0)
         gl.glDisableVertexAttribArray(1)
         gl.glDisableVertexAttribArray(2)
+        gl.glDisableVertexAttribArray(3)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)

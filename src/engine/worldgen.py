@@ -521,6 +521,197 @@ def create_discovery(position, colour=(200, 180, 80)):
     return Mesh(verts, faces, colour, position)
 
 
+# Chunk terrain (world-space height sampling so seams match)
+
+def _terrain_vertex_colour(wx, wz, seed, base):
+    """Compute a per-vertex terrain colour from a low-frequency world-space
+    noise field. This makes colour vary organically and continuously across
+    chunk borders (no square seams)."""
+    # Low-frequency colour noise (0..1)
+    n = _smooth_noise(wx * 0.02, wz * 0.02, seed + 777)
+    n2 = _smooth_noise(wx * 0.05 + 100, wz * 0.05 + 100, seed + 888)
+    # Blend two octaves for organic variation
+    t = n * 0.6 + n2 * 0.4
+    # Narrow variation so chunks feel interconnected
+    r = base[0] + (t - 0.5) * 18
+    g = base[1] + (t - 0.5) * 14
+    b = base[2] + (t - 0.5) * 10
+    return (int(r), int(g), int(b))
+
+
+def _generate_chunk_terrain(cx, cz, chunk_size, segments, seed, colour):
+    """Build a terrain mesh for a chunk, sampling the noise at WORLD
+    coordinates so adjacent chunks share identical edge heights and
+    per-vertex colours blend smoothly across chunk borders."""
+    x0 = cx * chunk_size
+    z0 = cz * chunk_size
+
+    vertices = []
+    vertex_colours = []
+    for iz in range(segments + 1):
+        for ix in range(segments + 1):
+            wx = x0 + (chunk_size * ix / segments)
+            wz = z0 + (chunk_size * iz / segments)
+            y = get_terrain_height(wx, wz, seed, 1.5)
+            vertices.append((wx, y, wz))
+            vertex_colours.append(_terrain_vertex_colour(wx, wz, seed, colour))
+
+    faces = []
+    for iz in range(segments):
+        for ix in range(segments):
+            i0 = iz * (segments + 1) + ix
+            i1 = iz * (segments + 1) + ix + 1
+            i2 = (iz + 1) * (segments + 1) + ix
+            i3 = (iz + 1) * (segments + 1) + ix + 1
+            faces.append((i0, i1, i2))
+            faces.append((i2, i1, i3))
+
+    return Mesh(vertices, faces, colour, (0, 0, 0), vertex_colours=vertex_colours)
+
+
+# Chunk generation
+
+def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
+    """Generate a single deterministic terrain tile (chunk).
+
+    Args:
+        cx, cz: chunk grid coordinates (integers).
+        seed: global world seed.
+        chunk_size: world-space size of one chunk edge.
+        segments: terrain grid resolution per chunk.
+
+    Returns a dict with:
+        meshes     - list of Mesh objects for this chunk
+        obstacles  - list of (cx, cz, radius, height) collision circles
+        discoveries - list of dicts describing collectible landmarks
+    """
+    rng = random.Random(seed * 7919 + cx * 104729 + cz * 1299709)
+    result = {"meshes": [], "obstacles": [], "discoveries": []}
+    meshes = result["meshes"]
+    obstacles = result["obstacles"]
+    discoveries = result["discoveries"]
+
+    # World-space bounds of this chunk
+    x0 = cx * chunk_size
+    z0 = cz * chunk_size
+    x1 = x0 + chunk_size
+    z1 = z0 + chunk_size
+
+    r_base = rng.randint(205, 225)
+    g_base = rng.randint(140, 155)
+    b_base = rng.randint(60, 75)
+    terrain_colour = (r_base, g_base, b_base)
+
+    # Terrain mesh covering the chunk tile (world-space heights)
+    terrain = _generate_chunk_terrain(
+        cx, cz, chunk_size, segments, seed, terrain_colour,
+    )
+    meshes.append(terrain)
+
+    # Trees
+    tree_positions = []
+    num_trees = rng.randint(4, 8)
+    for i in range(num_trees):
+        tx = rng.uniform(x0 + 2, x1 - 2)
+        tz = rng.uniform(z0 + 2, z1 - 2)
+        ty = get_terrain_height(tx, tz, seed, 1.5)
+        if ty < -1.5:
+            continue
+        too_close = False
+        for ex, ez in tree_positions:
+            if (tx - ex) ** 2 + (tz - ez) ** 2 < 16.0:
+                too_close = True
+                break
+        if too_close:
+            continue
+        tree_positions.append((tx, tz))
+        tree_meshes = create_tree((tx, ty, tz), seed + i * 7 + cx * 31 + cz * 17)
+        meshes.extend(tree_meshes)
+        obstacles.append((tx, tz, 0.7, 4.0))
+
+    # Bushes
+    num_bushes = rng.randint(12, 24)
+    for i in range(num_bushes):
+        bx = rng.uniform(x0 + 1, x1 - 1)
+        bz = rng.uniform(z0 + 1, z1 - 1)
+        by = get_terrain_height(bx, bz, seed, 1.5)
+        too_close = False
+        for tx, tz in tree_positions:
+            if (bx - tx) ** 2 + (bz - tz) ** 2 < 4.0:
+                too_close = True
+                break
+        if too_close:
+            continue
+        meshes.append(create_bush((bx, by, bz), seed + i * 13 + 1000 + cx * 7 + cz * 11))
+
+    # Rocks
+    num_rocks = rng.randint(3, 6)
+    for i in range(num_rocks):
+        rx = rng.uniform(x0 + 1, x1 - 1)
+        rz = rng.uniform(z0 + 1, z1 - 1)
+        ry = get_terrain_height(rx, rz, seed, 1.5)
+        meshes.append(create_rock((rx, ry, rz), seed + i * 19 + 2000 + cx * 13 + cz * 29))
+        obstacles.append((rx, rz, 0.5, 1.2))
+
+    # Spinifex grass
+    num_spinifex = rng.randint(8, 16)
+    for i in range(num_spinifex):
+        sx = rng.uniform(x0 + 1, x1 - 1)
+        sz = rng.uniform(z0 + 1, z1 - 1)
+        sy = get_terrain_height(sx, sz, seed, 1.5)
+        too_close = False
+        for tx, tz in tree_positions:
+            if (sx - tx) ** 2 + (sz - tz) ** 2 < 4.0:
+                too_close = True
+                break
+        if too_close:
+            continue
+        meshes.append(create_spinifex((sx, sy, sz), seed + i * 31 + 3000 + cx * 19 + cz * 23))
+
+    # Discovery landmarks (sparse, deterministic)
+    # Only some chunks contain a discovery, so they feel special.
+    # The origin chunk always has one so the game is playable immediately.
+    if (cx == 0 and cz == 0) or rng.random() < 0.35:
+        dx = rng.uniform(x0 + 4, x1 - 4)
+        dz = rng.uniform(z0 + 4, z1 - 4)
+        dy = get_terrain_height(dx, dz, seed, 1.5)
+        name = rng.choice([
+            "Uluru Rock",
+            "River Red Gum",
+            "Spinifex Grass",
+            "Coolabah Tree",
+            "Desert Oak",
+        ])
+        category = "Landmark" if name == "Uluru Rock" else "Flora"
+        description = {
+            "Uluru Rock": "A weathered sandstone monolith sacred to the "
+                          "Anangu people of Central Australia.",
+            "River Red Gum": "A massive eucalyptus that grows beside "
+                             "watercourses across the outback.",
+            "Spinifex Grass": "A hardy, drought-resistant grass that covers "
+                              "vast areas of inland Australia.",
+            "Coolabah Tree": "A tree of the arid interior, often found "
+                             "growing in claypans and near waterholes.",
+            "Desert Oak": "A slow-growing tree with needle-like foliage, "
+                          "common to the spinifex country of the outback.",
+        }[name]
+        colour = rng.choice([
+            (210, 190, 80), (170, 220, 90), (200, 200, 60),
+            (120, 180, 120), (160, 200, 110),
+        ])
+        meshes.append(create_discovery((dx, dy, dz), colour=colour))
+        discoveries.append({
+            "x": dx,
+            "z": dz,
+            "y": dy,
+            "name": name,
+            "category": category,
+            "description": description,
+        })
+
+    return result
+
+
 # World generation
 
 def generate_world(seed=42, terrain_size=100, terrain_segments=30):

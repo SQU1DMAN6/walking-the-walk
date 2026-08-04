@@ -5,10 +5,12 @@ import sys
 import pygame
 
 from engine.bitmapfont import text_surface
+from engine.framebuffer import Framebuffer
 from engine.renderer import Renderer
-from engine.opengl_renderer import OpenGLRenderer, build_batches
+from engine.opengl_renderer import OpenGLRenderer
 from engine.camera import Camera
-from engine.worldgen import generate_world, get_terrain_height
+from engine.worldgen import get_terrain_height
+from engine.chunk import ChunkManager
 from engine.emu import Emu
 
 WIDTH = 1400
@@ -31,35 +33,33 @@ clock = pygame.time.Clock()
 
 camera = Camera()
 
-# Generate the procedural world once
+# Procedural chunk streaming
 WORLD_SEED = 42
-world_data = generate_world(seed=WORLD_SEED, terrain_size=100, terrain_segments=30)
-world_meshes = world_data["meshes"]
-world_obstacles = world_data["obstacles"]
-world_discoveries = world_data["discoveries"]
+CHUNK_SIZE = 40
+RENDER_DISTANCE = 2
 
-TERRAIN_SIZE = 100
-half = TERRAIN_SIZE / 2
+chunk_manager = ChunkManager(
+    seed=WORLD_SEED,
+    chunk_size=CHUNK_SIZE,
+    render_distance=RENDER_DISTANCE,
+    segments=12,
+)
 
-# Configure the camera: terrain following, collision, world bounds
+# Configure the camera: terrain following + collision (obstacles are
+# refreshed from loaded chunks each frame)
 camera.terrain_height_cb = lambda x, z: get_terrain_height(x, z, WORLD_SEED, 1.5)
-camera.obstacles = list(world_obstacles)
-camera.bounds = (-half + 1.5, half - 1.5, -half + 1.5, half - 1.5)
+camera.bounds = None  # unbounded world (chunks stream infinitely)
 
 renderer = OpenGLRenderer(WIDTH, HEIGHT) if use_opengl else Renderer(WIDTH, HEIGHT)
+framebuffer = Framebuffer(WIDTH, HEIGHT) if not use_opengl else None
 
-if use_opengl:
-    world_batches = build_batches(world_meshes)
-else:
-    world_batches = None
-
-# Wildlife: emus
+# Wildlife: emus (spawn near the origin chunk)
 emus = []
 for i in range(5):
     import random as _random
     rng = _random.Random(WORLD_SEED + 5000 + i)
-    ex = rng.uniform(-half + 8, half - 8)
-    ez = rng.uniform(-half + 8, half - 8)
+    ex = rng.uniform(-CHUNK_SIZE, CHUNK_SIZE)
+    ez = rng.uniform(-CHUNK_SIZE, CHUNK_SIZE)
     ey = get_terrain_height(ex, ez, WORLD_SEED, 1.5)
     emus.append(Emu(ex, ey, ez, seed=WORLD_SEED + 1000 + i))
 
@@ -79,7 +79,6 @@ HELP_TEXT = (
     "  W/A/S/D    - Move forward/left/backward/right\n"
     "  Shift      - Sprint\n"
     "  Mouse      - Look around\n"
-    "  Arrow Up/Down - Pitch camera\n"
     "  E          - Collect nearby discovery\n"
     "  J          - Toggle journal\n"
     "\n"
@@ -98,7 +97,7 @@ HELP_TEXT = (
     "  Discover its secrets.\n"
     "  Walk up to a glowing marker and press E to collect it.\n"
     "  Press J to view your journal.\n\n"
-    "Use F1 to close this Help message.\n"
+    "Use H to close this Help message.\n"
 )
 
 # Pre-render help text surface
@@ -113,8 +112,9 @@ journal_surface_dirty = True
 
 def _build_journal_surface():
     """Rebuild the journal overlay surface from current entries."""
+    total = len(chunk_manager.all_discoveries())
     base = "=== Field Journal ===\n"
-    base += "Discovered: %d/%d\n\n" % (len(journal_entries), len(world_discoveries))
+    base += "Discovered: %d/%d\n\n" % (len(journal_entries), total)
 
     if journal_entries:
         for e in journal_entries:
@@ -339,7 +339,7 @@ def draw_notification(surface):
 def try_collect_discovery():
     """Check if the player is near an uncollected discovery and collect it."""
     global notification, notification_timer, journal_surface_dirty
-    for d in world_discoveries:
+    for d in chunk_manager.all_discoveries():
         if d["name"] in inventory:
             continue
         dx = camera.x - d["x"]
@@ -411,6 +411,10 @@ while running:
 
     camera.update(dt)
 
+    # Stream chunks around the player and refresh collision obstacles
+    chunk_manager.update(camera.x, camera.z)
+    camera.obstacles = chunk_manager.all_obstacles()
+
     # Update emus
     for emu in emus:
         emu.update(dt, camera.x, camera.z)
@@ -429,19 +433,31 @@ while running:
         gl.glClearColor(90/255, 160/255, 205/255, 1.0)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 
-        renderer.render_frame(camera, world_batches)
+        renderer.render_frame(camera, chunk_manager.all_batches())
 
-        # Render emus (dynamic)
+        # Render emus as camera-facing billboards
         for emu in emus:
-            for (mesh, mx, my, mz, myaw) in emu.render_meshes():
-                renderer.render_mesh_dynamic(camera, mesh, mx, my, mz, myaw)
+            surf, ex, ey, ez, w, h = emu.billboard(camera.x, camera.z)
+            renderer.render_billboard(camera, surf, ex, ey, ez, w, h)
     else:
         framebuffer.clear((180, 120, 80))
-        for mesh in world_meshes:
-            renderer.render_mesh(camera, framebuffer, mesh)
-        for emu in emus:
-            for (mesh, mx, my, mz, myaw) in emu.render_meshes():
+        for chunk in chunk_manager.chunks.values():
+            for mesh in chunk.meshes:
                 renderer.render_mesh(camera, framebuffer, mesh)
+        for emu in emus:
+            surf, ex, ey, ez, w, h = emu.billboard(camera.x, camera.z)
+            # Software path: draw the sprite as a simple quad via a mesh
+            from engine.mesh import Mesh
+            hw = w / 2
+            hh = h
+            verts = [
+                (ex - hw, ey, ez),
+                (ex + hw, ey, ez),
+                (ex + hw, ey + hh, ez),
+                (ex - hw, ey + hh, ez),
+            ]
+            faces = [(0, 1, 2), (0, 2, 3)]
+            renderer.render_mesh(camera, framebuffer, Mesh(verts, faces, (120, 100, 80), (0, 0, 0)))
         framebuffer.present(screen)
 
     if show_help:

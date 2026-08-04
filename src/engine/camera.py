@@ -4,7 +4,8 @@ import pygame
 
 class Camera:
     """First-person camera with complete movement, obstacle collision,
-    smooth terrain following and a subtle head-bob."""
+    smooth terrain following, a visible head-bob and a negative pivot
+    offset."""
 
     def __init__(self, radius=0.4):
         self.x = 0.0
@@ -17,7 +18,6 @@ class Camera:
         self.move_speed = 3
         self.sprint_factor = 2.9
         self.mouse_sensitivity = 0.003
-        self.arrow_sensitivity = 1.6
 
         # Collision radius + list of obstacles to collide with
         self.radius = radius
@@ -28,7 +28,9 @@ class Camera:
         self.terrain_height_cb = None
         self.eye_height = 1.6
 
-        # Bobbing state
+        self.pivot_offset = -0.2
+
+        # Bobbing state (applied as a render offset, not fed back into y)
         self._bob_phase = 0.0
         self._bob_active = 0.0
         self.bob_offset = 0.0
@@ -48,6 +50,14 @@ class Camera:
         if self.terrain_height_cb is not None:
             return self.terrain_height_cb(tx, tz)
         return 0.0
+
+    def eye_position(self):
+        """Return the effective eye position (pivot + forward offset + bob)."""
+        fx, fz = self.forward_vec()
+        ex = self.x + fx * self.pivot_offset
+        ez = self.z + fz * self.pivot_offset
+        ey = self.y + self.bob_offset
+        return (ex, ey, ez)
 
     def resolve_collision(self, px, pz):
         """Push (px, pz) out of any obstacle the player overlaps."""
@@ -110,21 +120,24 @@ class Camera:
 
         self.x, self.z = nx, nz
 
-        # Ground interaction
+        # Ground interaction (smooth terrain following)
         ground = self.terrain_y_at(self.x, self.z)
         target_y = ground + self.eye_height
         self.y += (target_y - self.y) * min(1.0, dt * 12.0)
 
-        # Head-bob
+        # Head-bob: computed as a render offset, NOT fed back into self.y.
         moving = n > 0.0
-        if moving and self.y > ground + self.eye_height - 0.05:
+        if moving:
             self._bob_active = min(1.0, self._bob_active + dt * 6.0)
         else:
             self._bob_active = max(0.0, self._bob_active - dt * 6.0)
 
-        bob_speed = speed * 1.2
+        bob_speed = speed * 1.4
         self._bob_phase += dt * bob_speed * (1.0 if moving else 0.0)
-        self.bob_offset = math.sin(self._bob_phase * 2.0) * 0.045 * self._bob_active
+        # Vertical bob + slight lateral sway for a natural feel
+        self.bob_offset = (
+            math.sin(self._bob_phase * 2.0) * 0.06 * self._bob_active
+        )
 
         # Mouse look
         mouse_dx, mouse_dy = pygame.mouse.get_rel()
