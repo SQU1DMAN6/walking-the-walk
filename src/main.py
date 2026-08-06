@@ -3,6 +3,7 @@ import math
 import sys
 
 import pygame
+from screeninfo import get_monitors
 
 from engine.bitmapfont import text_surface
 from engine.framebuffer import Framebuffer
@@ -12,6 +13,16 @@ from engine.camera import Camera
 from engine.worldgen import get_terrain_height
 from engine.chunk import ChunkManager
 from engine.emu import Emu
+
+fs_w = 1400 
+fs_h = 1050
+
+for m in get_monitors():
+    if m.is_primary:
+        print(f"Width: {m.width}, Height: {m.height}")
+        fs_w = m.width
+        fs_h = m.height
+        break
 
 WIDTH = 1400
 HEIGHT = 1050
@@ -84,7 +95,7 @@ HELP_TEXT = (
     "\n"
     "Display:\n"
     "  F11        - Toggle fullscreen\n"
-    "  F1         - Toggle this help screen\n"
+    "  H          - Toggle this help screen\n"
     "\n"
     "Info:\n"
     "  ESC        - Release mouse grab (or quit if already released)\n"
@@ -357,8 +368,8 @@ def try_collect_discovery():
 
 
 running = True
-viewport_w = WIDTH
-viewport_h = HEIGHT
+viewport_w = 1400
+viewport_h = 1050
 
 while running:
     dt = clock.tick(60) / 1000.0
@@ -375,7 +386,7 @@ while running:
                 else:
                     running = False
 
-            if event.key == pygame.K_F1:
+            if event.key == pygame.K_h:
                 show_help = not show_help
 
             if event.key == pygame.K_F11:
@@ -395,8 +406,8 @@ while running:
 
         if event.type == pygame.VIDEORESIZE and not is_fullscreen:
             WIDTH, HEIGHT = event.w, event.h
-            viewport_w = WIDTH
-            viewport_h = HEIGHT
+            viewport_w = fs_w
+            viewport_h = fs_h
             if use_opengl:
                 import OpenGL.GL as gl
                 gl.glViewport(0, 0, WIDTH, HEIGHT)
