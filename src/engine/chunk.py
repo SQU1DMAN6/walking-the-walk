@@ -16,14 +16,15 @@ class Chunk:
     """A loaded chunk: its grid coords, meshes, obstacles, discoveries and
     the GPU batches (VBOs) baked from its meshes."""
 
-    __slots__ = ('cx', 'cz', 'meshes', 'obstacles', 'discoveries', 'batches')
+    __slots__ = ('cx', 'cz', 'meshes', 'obstacles', 'discoveries', 'resources', 'batches')
 
-    def __init__(self, cx, cz, meshes, obstacles, discoveries, batches):
+    def __init__(self, cx, cz, meshes, obstacles, discoveries, resources, batches):
         self.cx = cx
         self.cz = cz
         self.meshes = meshes
         self.obstacles = obstacles
         self.discoveries = discoveries
+        self.resources = resources
         self.batches = batches
 
 
@@ -60,6 +61,7 @@ class ChunkManager:
             data["meshes"],
             data["obstacles"],
             data["discoveries"],
+            data["resources"],
             batches,
         )
         self.chunks[(cx, cz)] = chunk
@@ -122,6 +124,13 @@ class ChunkManager:
         for chunk in self.chunks.values():
             discoveries.extend(chunk.discoveries)
         return discoveries
+
+    def all_resources(self):
+        """Flatten all loaded chunks' collectible resource nodes."""
+        resources = []
+        for chunk in self.chunks.values():
+            resources.extend(chunk.resources)
+        return resources
 
     def clear(self):
         """Unload all chunks (frees all GPU VBOs)."""

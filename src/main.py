@@ -10,9 +10,11 @@ from engine.framebuffer import Framebuffer
 from engine.renderer import Renderer
 from engine.opengl_renderer import OpenGLRenderer
 from engine.camera import Camera
-from engine.worldgen import get_terrain_height
+from engine.worldgen import get_terrain_height, create_camp, create_resource
 from engine.chunk import ChunkManager
 from engine.emu import Emu
+from engine.items import ITEMS, RECIPES, RECIPE_ORDER
+from engine.inventory import Inventory, USABLE_EFFECTS
 
 fs_w = 1400 
 fs_h = 1050
@@ -49,6 +51,9 @@ WORLD_SEED = 42
 CHUNK_SIZE = 40
 RENDER_DISTANCE = 2
 
+# The player camp: safe respawn and crafting hub near the origin.
+CAMP_POS = (0.0, 0.0, -8.0)
+
 chunk_manager = ChunkManager(
     seed=WORLD_SEED,
     chunk_size=CHUNK_SIZE,
@@ -64,6 +69,10 @@ camera.bounds = None  # unbounded world (chunks stream infinitely)
 renderer = OpenGLRenderer(WIDTH, HEIGHT) if use_opengl else Renderer(WIDTH, HEIGHT)
 framebuffer = Framebuffer(WIDTH, HEIGHT) if not use_opengl else None
 
+# Build the camp meshes once (a small fire ring and lean-to near the origin)
+_camp_y = get_terrain_height(CAMP_POS[0], CAMP_POS[2], WORLD_SEED, 1.5)
+campsite = create_camp((CAMP_POS[0], _camp_y, CAMP_POS[2]))
+
 # Wildlife: emus (spawn near the origin chunk)
 emus = []
 for i in range(5):
@@ -75,11 +84,19 @@ for i in range(5):
     emus.append(Emu(ex, ey, ez, seed=WORLD_SEED + 1000 + i))
 
 # Inventory & journal
-inventory = []           # list of collected discovery names
-journal_entries = []     # list of dicts (already collected)
+player_inventory = Inventory()   # slot-based items (resources, tools, food)
+journal_entries = []             # list of discovery dicts (already collected)
 show_journal = False
+show_inventory = False
+show_crafting = False
+crafting_index = 0               # highlighted recipe on the crafting screen
 notification = None
 notification_timer = 0.0
+interaction_prompt = None        # Press E - ... hint drawn on the HUD
+
+# Combat / damage feedback
+hurt_timer = 0.0          # red vignette intensity while recently hurt
+damage_notice_cd = 0.0    # cooldown between "an emu kicked you" messages
 
 show_help = True
 
@@ -90,7 +107,12 @@ HELP_TEXT = (
     "  W/A/S/D    - Move forward/left/backward/right\n"
     "  Shift      - Sprint\n"
     "  Mouse      - Look around\n"
-    "  E          - Collect nearby discovery\n"
+    "  E          - Interact (collect / open camp crafting)\n"
+    "  I          - Toggle inventory\n"
+    "  C          - Toggle crafting (at camp)\n"
+    "  Q          - Use a survival item (food/medical)\n"
+    "  W/S        - Navigate recipes while crafting\n"
+    "  Enter      - Craft selected recipe\n"
     "  J          - Toggle journal\n"
     "\n"
     "Display:\n"
@@ -101,13 +123,24 @@ HELP_TEXT = (
     "  ESC        - Release mouse grab (or quit if already released)\n"
     "  Ctrl+Q     - Quit game\n"
     "\n"
+    "Survival:\n"
+    "  Sprinting drains stamina (blue bar); it recovers when you stop.\n"
+    "  Some emus charge and kick if you get too close.\n"
+    "  Craft a Spear or Stone Tool to reduce kick damage.\n"
+    "  Hit 0 health and you wake back at camp.\n"
+    "\n"
     "Written by Quan Thai\n"
     "\nGoals:\n"
     "  Explore the Australian outback.\n"
     "  Hide from its wild animals.\n"
     "  Discover its secrets.\n"
     "  Walk up to a glowing marker and press E to collect it.\n"
-    "  Press J to view your journal.\n\n"
+    "  Press J to view your journal.\n"
+    "\n"
+    "Crafting:\n"
+    "  Walk up to your camp (near the origin) and press E or C.\n"
+    "  Select a recipe with W/S and press Enter to craft.\n"
+    "\n"
     "Use H to close this Help message.\n"
 )
 
@@ -145,7 +178,8 @@ _journal_tex_id = None
 
 def _surface_to_texture(surface, tex_id):
     import OpenGL.GL as gl
-    data = pygame.image.tostring(surface, "RGBA", True)
+    data = pygame.image.tostring(
+        pygame.transform.flip(surface, False, True), "RGBA", False)
     if tex_id is None:
         tex_id = gl.glGenTextures(1)
     gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
@@ -347,24 +381,272 @@ def draw_notification(surface):
         surface.blit(font_surf, ((WIDTH - font_surf.get_width()) // 2, 70))
 
 
-def try_collect_discovery():
-    """Check if the player is near an uncollected discovery and collect it."""
-    global notification, notification_timer, journal_surface_dirty
+def draw_hud(surface):
+    """Draw the health & stamina bars and a red damage vignette."""
+    global hurt_timer
+
+    BW, BH = 260.0, 20.0
+    BX, BY = 30.0, 28.0
+
+    hf = max(0.0, min(1.0, camera.health / camera.max_health))
+    sf = max(0.0, min(1.0, camera.stamina / camera.max_stamina))
+    hcol = (120, 200, 90) if hf > 0.5 else (230, 120, 60) if hf > 0.25 else (225, 45, 45)
+    scol = (110, 170, 220) if not camera.exhausted else (200, 120, 60)
+
+    if use_opengl:
+        import OpenGL.GL as gl
+        gl.glDisable(gl.GL_DEPTH_TEST)
+        gl.glMatrixMode(gl.GL_PROJECTION)
+        gl.glPushMatrix()
+        gl.glLoadIdentity()
+        gl.glOrtho(0, WIDTH, HEIGHT, 0, -1, 1)
+        gl.glMatrixMode(gl.GL_MODELVIEW)
+        gl.glPushMatrix()
+        gl.glLoadIdentity()
+        gl.glEnable(gl.GL_BLEND)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+
+        def quad(x, y, w, h, col, a=0.85):
+            gl.glColor4f(col[0] / 255.0, col[1] / 255.0, col[2] / 255.0, a)
+            gl.glBegin(gl.GL_QUADS)
+            gl.glVertex2f(x, y)
+            gl.glVertex2f(x + w, y)
+            gl.glVertex2f(x + w, y + h)
+            gl.glVertex2f(x, y + h)
+            gl.glEnd()
+
+        # Health bar
+        quad(BX - 3, BY - 3, BW + 6, BH + 6, (0, 0, 0), 0.6)
+        quad(BX, BY, BW, BH, (40, 40, 40), 0.9)
+        quad(BX, BY, BW * hf, BH, hcol)
+        # Stamina bar
+        sy = BY + BH + 10
+        quad(BX - 3, sy - 3, BW + 6, BH + 6, (0, 0, 0), 0.6)
+        quad(BX, sy, BW, BH, (40, 40, 40), 0.9)
+        quad(BX, sy, BW * sf, BH, scol)
+
+        # Red vignette while recently hurt
+        if hurt_timer > 0.0:
+            a = min(0.45, hurt_timer * 1.6)
+            gl.glColor4f(0.8, 0.05, 0.05, a)
+            gl.glBegin(gl.GL_QUADS)
+            gl.glVertex2f(0, 0)
+            gl.glVertex2f(WIDTH, 0)
+            gl.glVertex2f(WIDTH, HEIGHT)
+            gl.glVertex2f(0, HEIGHT)
+            gl.glEnd()
+
+        gl.glPopMatrix()
+        gl.glMatrixMode(gl.GL_PROJECTION)
+        gl.glPopMatrix()
+        gl.glMatrixMode(gl.GL_MODELVIEW)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+    else:
+        # Software path: draw bars with pygame rects
+        pygame.draw.rect(surface, (0, 0, 0), (BX - 3, BY - 3, BW + 6, BH + 6))
+        pygame.draw.rect(surface, (60, 60, 60), (BX, BY, BW, BH))
+        pygame.draw.rect(surface, hcol, (BX, BY, BW * hf, BH))
+        sy = BY + BH + 10
+        pygame.draw.rect(surface, (0, 0, 0), (BX - 3, sy - 3, BW + 6, BH + 6))
+        pygame.draw.rect(surface, (60, 60, 60), (BX, sy, BW, BH))
+        pygame.draw.rect(surface, scol, (BX, sy, BW * sf, BH))
+
+    # Interaction prompt (Press E - ...)
+    draw_interaction_prompt(surface)
+
+    # Inventory panel
+    if show_inventory:
+        inv_surf = _build_inventory_surface()
+        _draw_panel(surface, inv_surf, alpha=0.82)
+
+    # Crafting panel
+    if show_crafting:
+        craft_surf = _build_crafting_surface()
+        _draw_panel(surface, craft_surf, alpha=0.82)
+
+
+def _dist2(px, pz, tx, tz):
+    return math.sqrt((px - tx) ** 2 + (pz - tz) ** 2)
+
+
+def _find_nearest(spots, radius):
+    """Return the nearest spot dict within `radius`, or None."""
+    best, best_d = None, 1e18
+    for s in spots:
+        d = _dist2(camera.x, camera.z, s["x"], s["z"])
+        if d < radius and d < best_d:
+            best, best_d = s, d
+    return best
+
+
+def find_interactable():
+    """Return (kind, label, target) for the nearest interactable, or None."""
+    collected = set(e["name"] for e in journal_entries)
     for d in chunk_manager.all_discoveries():
-        if d["name"] in inventory:
+        if d["name"] in collected:
             continue
-        dx = camera.x - d["x"]
-        dz = camera.z - d["z"]
-        if math.sqrt(dx * dx + dz * dz) < 3.0:
-            name = d["name"]
-            inventory.append(name)
-            journal_entries.append(d)
-            journal_surface_dirty = True
-            notification = "Discovered: %s" % name
-            notification_timer = 4.0
-            return
-    notification = "Nothing to discover nearby."
+        if _dist2(camera.x, camera.z, d["x"], d["z"]) < 3.0:
+            return ("discovery", "Collect discovery: %s" % d["name"], d)
+    r = _find_nearest(chunk_manager.all_resources(), 3.0)
+    if r is not None:
+        return ("resource", "Collect %s" % ITEMS[r["item_id"]][0], r)
+    if _dist2(camera.x, camera.z, CAMP_POS[0], CAMP_POS[2]) < 4.0:
+        return ("camp", "Use camp (craft)", None)
+    return None
+
+
+def try_interact():
+    """Player pressed E: collect a discovery/resource or open camp crafting."""
+    global notification, notification_timer, journal_surface_dirty, show_crafting
+    target = find_interactable()
+    if target is None:
+        notification = "Nothing to interact with nearby."
+        notification_timer = 3.0
+        return
+    kind, label, obj = target
+    if kind == "discovery":
+        journal_entries.append(obj)
+        journal_surface_dirty = True
+        notification = "Discovered: %s" % obj["name"]
+        notification_timer = 4.0
+    elif kind == "resource":
+        leftover = player_inventory.add(obj["item_id"], obj["qty"])
+        name = ITEMS[obj["item_id"]][0]
+        if leftover > 0:
+            notification = "Picked up %s (inventory full!)" % name
+        else:
+            notification = "Picked up %s (+%d)" % (name, obj["qty"])
+        notification_timer = 3.0
+        for ch in chunk_manager.chunks.values():
+            ch.resources = [rr for rr in ch.resources if rr is not obj]
+    elif kind == "camp":
+        show_crafting = True
+        globals().update(show_inventory=False, show_journal=False)
+
+
+def use_survival_item():
+    """Consume the first available food/water/medical item for its effect."""
+    global notification, notification_timer
+    for item_id in USABLE_EFFECTS:
+        if player_inventory.count(item_id) > 0:
+            eff = USABLE_EFFECTS[item_id]
+            player_inventory.remove(item_id, 1)
+            if eff["kind"] == "heal":
+                camera.health = min(camera.max_health, camera.health + eff["amount"])
+            elif eff["kind"] == "stamina":
+                camera.stamina = min(camera.max_stamina, camera.stamina + eff["amount"])
+            notification = eff["msg"]
+            notification_timer = 3.0
+            return True
+    return False
+
+
+def try_craft(recipe_id):
+    """Consume materials and add the crafted output to the inventory."""
+    global notification, notification_timer
+    rec = RECIPES[recipe_id]
+    for iid, q in rec["materials"].items():
+        if not player_inventory.has(iid, q):
+            notification = "Missing materials for %s." % rec["name"]
+            notification_timer = 3.0
+            return False
+    for iid, q in rec["materials"].items():
+        player_inventory.remove(iid, q)
+    player_inventory.add(rec["output"], rec["quantity"])
+    notification = "Crafted %s!" % rec["name"]
     notification_timer = 3.0
+    return True
+
+
+def _build_inventory_surface():
+    base = "=== Inventory ===\n"
+    base += "Use a survival item with Q.  Close with I.\n\n"
+    entries = player_inventory.listed()
+    if not entries:
+        base += "Your pack is empty.\n"
+        base += "Collect wood, stone and fibre around the outback.\n"
+    for item_id, name, category, qty in entries:
+        base += "%s  x%d  (%s)\n" % (name, qty, category)
+    base += "\nSlots: %d/%d\n" % (len(player_inventory.slots),
+                                  player_inventory.capacity)
+    return text_surface(base, colour=(200, 210, 190), spacing=2)
+
+
+def _build_crafting_surface():
+    base = "=== Crafting (camp) ===\n"
+    base += "Select with W/S, craft with E, close with C.\n\n"
+    for idx, rid in enumerate(RECIPE_ORDER):
+        rec = RECIPES[rid]
+        marker = ">" if idx == crafting_index else " "
+        mats = ", ".join("%s x%d" % (ITEMS[ii][0], q)
+                          for ii, q in rec["materials"].items())
+        can = all(player_inventory.has(ii, q) for ii, q in rec["materials"].items())
+        status = "[craft]" if can else "[need ]"
+        base += "%s %s  %-16s  %s\n" % (marker, status, rec["name"], mats)
+    return text_surface(base, colour=(200, 220, 180), spacing=2)
+
+
+def _draw_panel(surface, panel_surface, alpha=0.78):
+    """Draw a pre-rendered text surface as a centered overlay."""
+    if use_opengl:
+        pid = _surface_to_texture(panel_surface, None)
+        draw_text_overlay(surface, pid, panel_surface.get_width(),
+                          panel_surface.get_height(), alpha)
+    else:
+        s = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        s.fill((0, 0, 0, 180))
+        surface.blit(s, (0, 0))
+        x = (WIDTH - panel_surface.get_width()) // 2
+        y = (HEIGHT - panel_surface.get_height()) // 2
+        surface.blit(panel_surface, (x, y))
+
+
+def draw_interaction_prompt(surface):
+    """Draw the contextual Press-E hint near the bottom of the screen."""
+    global interaction_prompt
+    if not interaction_prompt or show_help or show_journal or show_crafting or show_inventory:
+        return
+    hint = "Press E - %s" % interaction_prompt
+    font_surf = text_surface(hint, colour=(230, 220, 170), spacing=1)
+    if use_opengl:
+        import OpenGL.GL as gl
+        gl.glDisable(gl.GL_DEPTH_TEST)
+        gl.glMatrixMode(gl.GL_PROJECTION); gl.glPushMatrix(); gl.glLoadIdentity()
+        gl.glOrtho(0, WIDTH, HEIGHT, 0, -1, 1)
+        gl.glMatrixMode(gl.GL_MODELVIEW); gl.glPushMatrix(); gl.glLoadIdentity()
+        gl.glEnable(gl.GL_BLEND)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        bx = (WIDTH - font_surf.get_width()) // 2 - 18
+        by = HEIGHT - 110
+        bw = font_surf.get_width() + 36
+        bh = font_surf.get_height() + 16
+        gl.glColor4f(0.0, 0.0, 0.0, 0.55)
+        gl.glBegin(gl.GL_QUADS)
+        gl.glVertex2f(bx, by); gl.glVertex2f(bx + bw, by)
+        gl.glVertex2f(bx + bw, by + bh); gl.glVertex2f(bx, by + bh)
+        gl.glEnd()
+        texid = _surface_to_texture(font_surf, None)
+        gl.glEnable(gl.GL_TEXTURE_2D)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, texid)
+        gl.glColor4f(1, 1, 1, 1)
+        tx = bx + 18; ty = by + 8
+        gl.glBegin(gl.GL_QUADS)
+        gl.glTexCoord2f(0, 1); gl.glVertex2f(tx, ty)
+        gl.glTexCoord2f(1, 1); gl.glVertex2f(tx + font_surf.get_width(), ty)
+        gl.glTexCoord2f(1, 0); gl.glVertex2f(tx + font_surf.get_width(), ty + font_surf.get_height())
+        gl.glTexCoord2f(0, 0); gl.glVertex2f(tx, ty + font_surf.get_height())
+        gl.glEnd()
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        gl.glDisable(gl.GL_TEXTURE_2D)
+        gl.glPopMatrix()
+        gl.glMatrixMode(gl.GL_PROJECTION); gl.glPopMatrix()
+        gl.glMatrixMode(gl.GL_MODELVIEW)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+    else:
+        x = (WIDTH - font_surf.get_width()) // 2
+        y = HEIGHT - 90
+        surface.blit(font_surf, (x, y))
+
 
 
 running = True
@@ -399,7 +681,30 @@ while running:
                 running = False
 
             if event.key == pygame.K_e and pygame.event.get_grab():
-                try_collect_discovery()
+                try_interact()
+
+            if event.key == pygame.K_i and pygame.event.get_grab():
+                show_inventory = not show_inventory
+                show_crafting = False
+                show_journal = False
+
+            if event.key == pygame.K_c and pygame.event.get_grab():
+                show_crafting = not show_crafting
+                show_inventory = False
+                show_journal = False
+                if show_crafting:
+                    crafting_index = 0
+
+            if show_crafting and pygame.event.get_grab():
+                if event.key == pygame.K_w:
+                    crafting_index = (crafting_index - 1) % len(RECIPE_ORDER)
+                elif event.key == pygame.K_s:
+                    crafting_index = (crafting_index + 1) % len(RECIPE_ORDER)
+                elif event.key == pygame.K_RETURN:
+                    try_craft(RECIPE_ORDER[crafting_index])
+
+            if event.key == pygame.K_q and pygame.event.get_grab():
+                use_survival_item()
 
             if event.key == pygame.K_j and pygame.event.get_grab():
                 show_journal = not show_journal
@@ -420,23 +725,60 @@ while running:
             pygame.event.set_grab(True)
             pygame.mouse.set_visible(False)
 
+    camera.window_center = (WIDTH, HEIGHT)
+    camera.grab_active = pygame.event.get_grab()
     camera.update(dt)
 
     # Stream chunks around the player and refresh collision obstacles
     chunk_manager.update(camera.x, camera.z)
     camera.obstacles = chunk_manager.all_obstacles()
 
-    # Update emus
+    # Update emus (FSM) and apply any kick damage to the player
     for emu in emus:
         emu.update(dt, camera.x, camera.z)
         # Keep emus grounded on terrain
         emu.y = get_terrain_height(emu.x, emu.z, WORLD_SEED, 1.5)
+        dmg = emu.take_hit()
+        if dmg > 0.0 and camera.health > 0.0:
+            # Defensive tools reduce incoming kick damage
+            if player_inventory.count("spear") > 0:
+                dmg *= 0.2   # spear blocks ~80% of the kick
+                deflect_msg = "Your spear deflects most of the kick! (-%d)" % int(dmg)
+            elif player_inventory.count("stone_tool") > 0:
+                dmg *= 0.6   # stone tool absorbs ~40%
+                deflect_msg = "Your stone tool absorbs some of the kick! (-%d)" % int(dmg)
+            else:
+                deflect_msg = None
+            alive = camera.take_damage(dmg)
+            hurt_timer = 0.6
+            if damage_notice_cd <= 0.0:
+                notification = deflect_msg or "An emu kicked you! (-%d)" % int(dmg)
+                notification_timer = 2.5
+                damage_notice_cd = 2.5
+            if not alive:
+                # Respawn at the origin
+                camera.x, camera.z = 0.0, -8.0
+                camera.y = camera.terrain_y_at(0.0, -8.0) + camera.eye_height
+                camera.health = camera.max_health
+                camera.stamina = camera.max_stamina
+                notification = "Kicked out cold... you wake back at your camp."
+                notification_timer = 5.0
+
+    # Decay combat feedback timers
+    if hurt_timer > 0.0:
+        hurt_timer -= dt
+    if damage_notice_cd > 0.0:
+        damage_notice_cd -= dt
 
     # Decay notification
     if notification_timer > 0.0:
         notification_timer -= dt
         if notification_timer <= 0.0:
             notification = None
+
+    # Update contextual interaction prompt
+    _ip = find_interactable()
+    interaction_prompt = _ip[1] if _ip else None
 
     if use_opengl:
         import OpenGL.GL as gl
@@ -450,6 +792,18 @@ while running:
         for emu in emus:
             surf, ex, ey, ez, w, h = emu.billboard(camera.x, camera.z)
             renderer.render_billboard(camera, surf, ex, ey, ez, w, h)
+
+        # Render resource nodes (build coloured cube mesh on-the-fly)
+        for res in chunk_manager.all_resources():
+            mesh = create_resource((res["x"], res["y"], res["z"]),
+                                   res["item_id"])
+            renderer.render_mesh_dynamic(
+                camera, mesh, res["x"], res["y"], res["z"])
+
+        # Render camp meshes at the camp world position
+        for mesh in campsite:
+            renderer.render_mesh_dynamic(
+                camera, mesh, CAMP_POS[0], _camp_y, CAMP_POS[2])
     else:
         framebuffer.clear((180, 120, 80))
         for chunk in chunk_manager.chunks.values():
@@ -470,6 +824,8 @@ while running:
             faces = [(0, 1, 2), (0, 2, 3)]
             renderer.render_mesh(camera, framebuffer, Mesh(verts, faces, (120, 100, 80), (0, 0, 0)))
         framebuffer.present(screen)
+
+    draw_hud(screen)
 
     if show_help:
         draw_help(screen)

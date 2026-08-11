@@ -435,8 +435,8 @@ class OpenGLRenderer:
         gl.glUniform1f(self.near_loc, self.near)
         gl.glUniform1f(self.far_loc, self.far)
 
-        gl.glUniform1f(self.ambient_loc, 0.35)
-        gl.glUniform1f(self.diffuse_loc, 0.65)
+        gl.glUniform1f(self.ambient_loc, 0.45)
+        gl.glUniform1f(self.diffuse_loc, 0.55)
 
         # Fog
         gl.glUniform3f(self.fog_color_loc, self.fog_color[0], self.fog_color[1], self.fog_color[2])
@@ -501,7 +501,8 @@ class OpenGLRenderer:
         if tex_id is not None:
             return tex_id
 
-        data = pygame.image.tostring(surface, "RGBA", True)
+        data = pygame.image.tostring(
+            pygame.transform.flip(surface, False, True), "RGBA", False)
         tex_id = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA,

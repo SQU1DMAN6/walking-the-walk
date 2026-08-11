@@ -521,6 +521,59 @@ def create_discovery(position, colour=(200, 180, 80)):
     return Mesh(verts, faces, colour, position)
 
 
+
+RESOURCE_COLOURS = {
+    "wood": (150, 105, 60),
+    "stone": (160, 160, 165),
+    "fibre": (190, 200, 90),
+    "bark": (140, 70, 50),
+    "bush_tomato": (210, 70, 70),
+    "spinifex": (180, 200, 90),
+}
+
+
+def _cube(center, r, colour):
+    """A small solid cube mesh centred at `center` with half-size r."""
+    cx, cy, cz = center
+    verts = [
+        (-r, -r, -r), ( r, -r, -r), ( r, r, -r), (-r, r, -r),
+        (-r, -r,  r), ( r, -r,  r), ( r, r,  r), (-r, r,  r),
+    ]
+    faces = [
+        (0,1,2), (0,2,3), (4,6,5), (4,7,6),
+        (0,4,5), (0,5,1), (1,5,6), (1,6,2),
+        (2,6,7), (2,7,3), (3,7,4), (3,4,0),
+    ]
+    return Mesh(verts, faces, colour, (cx, cy, cz))
+
+
+def create_resource(position, item_id):
+    """A small floating marker for a collectible resource node."""
+    col = RESOURCE_COLOURS.get(item_id, (200, 200, 200))
+    return _cube(position, 0.18, col)
+
+
+def create_camp(position):
+    """Meshes for the player camp: a fire ring and a lean-to tarp."""
+    mx, my, mz = position
+    meshes = []
+    for dx in (-0.5, 0.5):
+        for dz in (-0.5, 0.5):
+            meshes.append(_cube((mx + dx, my + 0.08, mz + dz), 0.12, (120, 115, 110)))
+    meshes.append(_cube((mx, my + 0.14, mz), 0.07, (235, 150, 60)))
+    tent_col = (120, 90, 70)
+    verts = [
+        (-0.9, 0.0, 0.0), ( 0.9, 0.0, 0.0), (0.0, 0.8, 0.0),
+        (-0.9, 0.0, 1.3), ( 0.9, 0.0, 1.3), (0.0, 0.8, 1.3),
+    ]
+    faces = [
+        (0, 2, 1), (3, 4, 5), (0, 1, 4), (0, 4, 3),
+        (1, 2, 5), (1, 5, 4), (2, 0, 3), (2, 3, 5),
+    ]
+    meshes.append(Mesh(verts, faces, tent_col, (mx + 1.3, my, mz - 0.5)))
+    return meshes
+
+
 # Chunk terrain (world-space height sampling so seams match)
 
 def _terrain_vertex_colour(wx, wz, seed, base):
@@ -586,10 +639,11 @@ def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
         discoveries - list of dicts describing collectible landmarks
     """
     rng = random.Random(seed * 7919 + cx * 104729 + cz * 1299709)
-    result = {"meshes": [], "obstacles": [], "discoveries": []}
+    result = {"meshes": [], "obstacles": [], "discoveries": [], "resources": []}
     meshes = result["meshes"]
     obstacles = result["obstacles"]
     discoveries = result["discoveries"]
+    resources = result["resources"]
 
     # World-space bounds of this chunk
     x0 = cx * chunk_size
@@ -597,9 +651,9 @@ def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
     x1 = x0 + chunk_size
     z1 = z0 + chunk_size
 
-    r_base = rng.randint(205, 225)
-    g_base = rng.randint(140, 155)
-    b_base = rng.randint(60, 75)
+    r_base = rng.randint(215, 240)
+    g_base = rng.randint(160, 195)
+    b_base = rng.randint(85, 120)
     terrain_colour = (r_base, g_base, b_base)
 
     # Terrain mesh covering the chunk tile (world-space heights)
@@ -645,15 +699,18 @@ def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
         meshes.append(create_bush((bx, by, bz), seed + i * 13 + 1000 + cx * 7 + cz * 11))
 
     # Rocks
+    rock_positions = []
     num_rocks = rng.randint(3, 6)
     for i in range(num_rocks):
         rx = rng.uniform(x0 + 1, x1 - 1)
         rz = rng.uniform(z0 + 1, z1 - 1)
         ry = get_terrain_height(rx, rz, seed, 1.5)
+        rock_positions.append((rx, rz))
         meshes.append(create_rock((rx, ry, rz), seed + i * 19 + 2000 + cx * 13 + cz * 29))
         obstacles.append((rx, rz, 0.5, 1.2))
 
     # Spinifex grass
+    spinifex_positions = []
     num_spinifex = rng.randint(8, 16)
     for i in range(num_spinifex):
         sx = rng.uniform(x0 + 1, x1 - 1)
@@ -666,7 +723,41 @@ def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
                 break
         if too_close:
             continue
+        spinifex_positions.append((sx, sz))
         meshes.append(create_spinifex((sx, sy, sz), seed + i * 31 + 3000 + cx * 19 + cz * 23))
+
+    # Collectible resources near their source (wood/bark by trees, stone by    # rocks, fibre by spinifex)
+    for tx, tz in tree_positions:
+        for _ in range(2):
+            if rng.random() < 0.5:
+                rx = tx + rng.uniform(-1.3, 1.3)
+                rz = tz + rng.uniform(-1.3, 1.3)
+                ry = get_terrain_height(rx, rz, seed, 1.5)
+                item = "bark" if rng.random() < 0.3 else "wood"
+                pos = (rx, ry + 0.2, rz)
+                meshes.append(create_resource(pos, item))
+                resources.append({"x": rx, "y": ry + 0.2, "z": rz,"item_id": item, "qty": 1})
+        if rng.random() < 0.5:
+            rx = tx + rng.uniform(-1.4, 1.4)
+            rz = tz + rng.uniform(-1.4, 1.4)
+            ry = get_terrain_height(rx, rz, seed, 1.5)
+            meshes.append(create_resource((rx, ry + 0.2, rz), "wood"))
+            resources.append({"x": rx, "y": ry + 0.2, "z": rz, "item_id": "wood", "qty": 1})
+    for rx, rz in rock_positions:
+        if rng.random() < 0.7:
+            sx = rx + rng.uniform(-0.7, 0.7)
+            sz = rz + rng.uniform(-0.7, 0.7)
+            sy = get_terrain_height(sx, sz, seed, 1.5)
+            meshes.append(create_resource((sx, sy + 0.2, sz), "stone"))
+            resources.append({"x": sx, "y": sy + 0.2, "z": sz, "item_id": "stone", "qty": 1})
+    for sx, sz in spinifex_positions:
+        if rng.random() < 0.5:
+            fx = sx + rng.uniform(-0.6, 0.6)
+            fz = sz + rng.uniform(-0.6, 0.6)
+            fy = get_terrain_height(fx, fz, seed, 1.5)
+            item = "bush_tomato" if rng.random() < 0.08 else "fibre"
+            meshes.append(create_resource((fx, fy + 0.2, fz), item))
+            resources.append({"x": fx, "y": fy + 0.2, "z": fz, "item_id": item, "qty": 1})
 
     # Discovery landmarks (sparse, deterministic)
     # Only some chunks contain a discovery, so they feel special.
@@ -731,9 +822,9 @@ def generate_world(seed=42, terrain_size=100, terrain_segments=30):
     discoveries = result["discoveries"]
 
     # Terrain colours: bright red/orange Australian outback palette
-    r_base = rng.randint(200, 240)
-    g_base = rng.randint(130, 170)
-    b_base = rng.randint(50, 90)
+    r_base = rng.randint(215, 245)
+    g_base = rng.randint(165, 200)
+    b_base = rng.randint(85, 120)
     terrain_colour = (r_base, g_base, b_base)
 
     terrain = generate_terrain(
