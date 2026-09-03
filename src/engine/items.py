@@ -2,23 +2,30 @@
 
 # Item catalogue: item_id -> (display name, category, max stack size)
 ITEMS = {
-    "wood":        ("Wood",            "Resource", 20),
-    "stone":       ("Stone",           "Resource", 20),
-    "fibre":       ("Fibre",           "Resource", 30),
-    "spinifex":    ("Spinifex",        "Resource", 30),
-    "bark":        ("Eucalyptus Bark", "Resource", 20),
-    "rope":        ("Rope",            "Resource", 10),
-    "bush_tomato": ("Bush Tomato",     "Food",      5),
-    "water":       ("Water",           "Water",     3),
-    "stone_tool":  ("Stone Tool",      "Tool",      1),
-    "spear":       ("Wooden Spear",    "Tool",      1),
-    "bandage":     ("Bandage",         "Medical",   5),
+    "wood":            ("Wood",            "Resource", 20),
+    "stone":           ("Stone",           "Resource", 20),
+    "fibre":           ("Fibre",           "Resource", 30),
+    "spinifex":        ("Spinifex",        "Resource", 30),
+    "bark":            ("Eucalyptus Bark", "Resource", 20),
+    "rope":            ("Rope",            "Resource", 10),
+    "bush_tomato":     ("Bush Tomato",     "Food",      5),
+    "water":           ("Water",           "Water",     3),
+    "stone_tool":      ("Stone Tool",      "Tool",      1),
+    "spear":           ("Wooden Spear",    "Tool",      1),
+    "bandage":         ("Bandage",         "Medical",   5),
+    "crafting_table":  ("Crafting Table",  "Furniture", 1),
 }
 
 
 # Crafting recipes: recipe_id -> definition
 #   materials: {item_id: qty}   output: item_id   quantity: n
 RECIPES = {
+    "crafting_table": {
+        "name": "Crafting Table",
+        "materials": {"wood": 6},
+        "output": "crafting_table",
+        "quantity": 1,
+    },
     "rope": {
         "name": "Rope",
         "materials": {"fibre": 2},
@@ -46,4 +53,4 @@ RECIPES = {
 }
 
 
-RECIPE_ORDER = ["rope", "stone_tool", "spear", "bandage"]
+RECIPE_ORDER = ["crafting_table", "rope", "stone_tool", "spear", "bandage"]

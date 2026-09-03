@@ -10,7 +10,7 @@ class Camera:
     def __init__(self, radius=0.4):
         self.x = 0.0
         self.y = 0.0
-        self.z = -8.0
+        self.z = -4.0
 
         self.yaw = 0.0
         self.pitch = 0.0
@@ -121,11 +121,21 @@ class Camera:
         # Sprint is gated by stamina: it drains while sprinting and slowly
         # regens when not sprinting.
         want_sprint = n > 0.0 and (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
-        sprinting = want_sprint and self.stamina > 0.0
+        
+        # Block sprint when stamina is below 20%
+        can_sprint = want_sprint and self.stamina >= 20.0
+        sprinting = can_sprint and n > 0.0
+        
+        # Stamina drain scales: slower at 100%, faster as it depletes
         if sprinting:
-            self.stamina = max(0.0, self.stamina - 22.0 * dt)
+            drain_factor = 0.5 + 0.5 * (1.0 - self.stamina / self.max_stamina)
+            self.stamina = max(0.0, self.stamina - 22.0 * dt * (0.7 + 0.3 * drain_factor))
+        elif n > 0.0 and self.stamina < 20.0:
+            # Walking with low stamina still drains slowly
+            self.stamina = max(0.0, self.stamina - 3.0 * dt)
         else:
             self.stamina = min(self.max_stamina, self.stamina + 14.0 * dt)
+        
         self.exhausted = want_sprint and self.stamina <= 0.0
         self.sprinting = sprinting
 
@@ -197,7 +207,5 @@ class Camera:
         elif self.yaw < -math.pi:
             self.yaw += two_pi
 
-        self.pitch = max(
-            -math.radians(89),
-            min(math.radians(89), self.pitch)
-        )
+        # Clamp pitch to prevent gimbal lock (±85 degrees, ~1.48 radians)
+        self.pitch = max(-1.48, min(1.48, self.pitch))

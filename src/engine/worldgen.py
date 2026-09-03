@@ -554,23 +554,39 @@ def create_resource(position, item_id):
 
 
 def create_camp(position):
-    """Meshes for the player camp: a fire ring and a lean-to tarp."""
+    """Meshes for the player camp: a larger, more noticeable camp with fire pit, tent, and tables."""
     mx, my, mz = position
     meshes = []
-    for dx in (-0.5, 0.5):
-        for dz in (-0.5, 0.5):
-            meshes.append(_cube((mx + dx, my + 0.08, mz + dz), 0.12, (120, 115, 110)))
-    meshes.append(_cube((mx, my + 0.14, mz), 0.07, (235, 150, 60)))
-    tent_col = (120, 90, 70)
-    verts = [
-        (-0.9, 0.0, 0.0), ( 0.9, 0.0, 0.0), (0.0, 0.8, 0.0),
-        (-0.9, 0.0, 1.3), ( 0.9, 0.0, 1.3), (0.0, 0.8, 1.3),
+    
+    # Larger fire ring with more stones
+    for dx in (-0.8, -0.3, 0.3, 0.8):
+        for dz in (-0.8, -0.3, 0.3, 0.8):
+            meshes.append(_cube((mx + dx, my + 0.1, mz + dz), 0.2, (100, 95, 90)))
+    
+    # Central fire pit (glowing orange)
+    meshes.append(_cube((mx, my + 0.2, mz), 0.3, (240, 140, 40)))
+    
+    # Larger tent structure
+    tent_col = (140, 100, 75)
+    tent_verts = [
+        (-2.0, 0.0, -1.5), ( 2.0, 0.0, -1.5), (0.0, 2.0, -0.5),
+        (-2.0, 0.0,  2.5), ( 2.0, 0.0,  2.5), (0.0, 2.0,  1.0),
+        (-2.0, 0.0,  0.0), ( 2.0, 0.0,  0.0), (-2.0, 0.0, -1.5),
     ]
-    faces = [
+    tent_faces = [
         (0, 2, 1), (3, 4, 5), (0, 1, 4), (0, 4, 3),
         (1, 2, 5), (1, 5, 4), (2, 0, 3), (2, 3, 5),
     ]
-    meshes.append(Mesh(verts, faces, tent_col, (mx + 1.3, my, mz - 0.5)))
+    meshes.append(Mesh(tent_verts, tent_faces, tent_col, (mx + 3.0, my, mz - 1.0)))
+    
+    # Camp tables (larger, more visible)
+    table_col = (160, 120, 80)
+    for dx, dz in [(-2.5, -1.5), (-2.5, 1.5), (2.5, -1.5)]:
+        meshes.append(_cube((mx + dx, my + 0.4, mz + dz), 0.5, table_col))
+        # Table legs
+        for ldx, ldz in [(-0.3, -0.3), (0.3, -0.3), (-0.3, 0.3), (0.3, 0.3)]:
+            meshes.append(_cube((mx + dx + ldx, my + 0.2, mz + dz + ldz), 0.08, (120, 90, 60)))
+    
     return meshes
 
 
@@ -735,20 +751,17 @@ def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
                 ry = get_terrain_height(rx, rz, seed, 1.5)
                 item = "bark" if rng.random() < 0.3 else "wood"
                 pos = (rx, ry + 0.2, rz)
-                meshes.append(create_resource(pos, item))
                 resources.append({"x": rx, "y": ry + 0.2, "z": rz,"item_id": item, "qty": 1})
         if rng.random() < 0.5:
             rx = tx + rng.uniform(-1.4, 1.4)
             rz = tz + rng.uniform(-1.4, 1.4)
             ry = get_terrain_height(rx, rz, seed, 1.5)
-            meshes.append(create_resource((rx, ry + 0.2, rz), "wood"))
             resources.append({"x": rx, "y": ry + 0.2, "z": rz, "item_id": "wood", "qty": 1})
     for rx, rz in rock_positions:
         if rng.random() < 0.7:
             sx = rx + rng.uniform(-0.7, 0.7)
             sz = rz + rng.uniform(-0.7, 0.7)
             sy = get_terrain_height(sx, sz, seed, 1.5)
-            meshes.append(create_resource((sx, sy + 0.2, sz), "stone"))
             resources.append({"x": sx, "y": sy + 0.2, "z": sz, "item_id": "stone", "qty": 1})
     for sx, sz in spinifex_positions:
         if rng.random() < 0.5:
@@ -756,7 +769,6 @@ def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
             fz = sz + rng.uniform(-0.6, 0.6)
             fy = get_terrain_height(fx, fz, seed, 1.5)
             item = "bush_tomato" if rng.random() < 0.08 else "fibre"
-            meshes.append(create_resource((fx, fy + 0.2, fz), item))
             resources.append({"x": fx, "y": fy + 0.2, "z": fz, "item_id": item, "qty": 1})
 
     # Discovery landmarks (sparse, deterministic)

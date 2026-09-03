@@ -42,7 +42,6 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
 
 pygame.event.set_grab(True)
 pygame.mouse.set_visible(False)
-pygame.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
 
 clock = pygame.time.Clock()
 
@@ -114,55 +113,56 @@ craft_anim_timer = 0.0    # crafting animation timer
 
 show_help = True
 help_page = 0  # current help page (0-2)
-help_flash_timer = 0.0  # flashes the close prompt on keypress
 
 HELP_PAGES = [
-    "Walking the Walk, written by Quan Thai\n\n"
-    "=== CONTROLS ===\n"
+    "=== Walking The Walk ===\n"
     "\n"
-    "W/A/S/D .......... Move\n"
-    "Shift ............ Sprint\n"
-    "Mouse ............ Look\n"
-    "E ................ Interact\n"
-    "I ................ Inventory\n"
-    "C ................ Crafting\n"
-    "J ................ Journal\n"
-    "Q ................ Use Item\n"
-    "UP/DOWN .......... Navigate\n"
-    "Enter ............ Confirm\n"
-    "H ................ Toggle Help\n"
-    "F11 .............. Fullscreen\n"
-    "ESC .............. Release Mouse\n"
-    "Ctrl + Q ......... Quit Game\n"
+    "Controls:\n"
+    "  W/A/S/D       - Move forward/left/backward/right\n"
+    "  Shift         - Sprint (needs 20%+ stamina)\n"
+    "  Mouse         - Look around\n"
+    "  E             - Interact (collect / place crafting table / open camp crafting)\n"
+    "  I             - Toggle inventory\n"
+    "  C             - Toggle crafting (requires placed crafting table)\n"
+    "  Q             - Use a survival item (food/medical)\n"
+    "  UP/DOWN       - Navigate recipes / inventory / help pages\n"
+    "  Enter         - Craft selected / confirm\n"
+    "  J             - Toggle journal\n"
+    "  H             - Toggle this help screen\n"
+    "\n"
+    "Display:\n"
+    "  F11           - Toggle fullscreen\n"
+    "\n"
+    "Info:\n"
+    "  ESC           - Release mouse grab (or quit if already released)\n"
+    "  Ctrl+Q        - Quit game\n"
+    "\n"
+    "Survival:\n"
+    "  Stamina (blue bar) drains while sprinting.\n"
+    "  Cannot sprint below 20% stamina; walking slowly drains at low stamina.\n"
+    "  Emus and kangaroos may attack if you get too close.\n"
+    "  Craft a Spear or Stone Tool to reduce kick damage.\n"
+    "  Hit 0 health and you wake back at camp.\n"
+    "\n"
+    "Crafting:\n"
+    "  Craft a Crafting Table (6 wood) and press E to place it.\n"
+    "  Walk up to a crafting table and press C to craft items.\n"
+    "  Select recipes with UP/DOWN, craft with Enter.\n"
+    "\n"
+    "Use H to close this Help message.\n"
 ]
 
 # Pre-render help text surfaces (one per page -- avoids regenerating every frame)
 _HELP_PAGE_SURFACES = [text_surface(page, colour=(200, 200, 200), spacing=2) for page in HELP_PAGES]
 _HELP_TEX_CACHE = {}  # page_index -> OpenGL texture id (created lazily on first draw)
 
-# Close prompt surface (yellow, highlighted)
-_HELP_CLOSE_SURFACE = text_surface("Press H to close", colour=(255, 230, 80), spacing=2)
-_HELP_CLOSE_TEX_CACHE = {}
-
 # Caches for overlays that change rarely -- only rebuild surface+texture when text changes
 _notification_cache = None  # (text, surface, tex_id)
 _prompt_cache = None        # (text, surface, tex_id)
 _held_cache = None          # (text, surface, tex_id)
 
-# FPS tracking
-_fps_accumulator = 0.0
-_fps_frame_count = 0
-_fps_display = 0
-
 # Cache for resource meshes by item_id (Mesh with local verts, position=(0,0,0))
 _resource_mesh_cache = {}
-
-# Performance: track last chunk position to avoid unnecessary updates
-_last_chunk_pos = None
-
-# Distance culling constants
-RENDER_DISTANCE_RESOURCES = 50.0  # only render resources within this distance
-RENDER_DISTANCE_WILDLIFE = 80.0   # only render wildlife within this distance
 
 # Pre-render journal overlay (rebuilt when entries change)
 journal_surface = None
@@ -172,17 +172,16 @@ journal_surface_dirty = True
 def _build_journal_surface():
     """Rebuild the journal overlay surface from current entries."""
     total = len(chunk_manager.all_discoveries())
-    base = "[J] Close\n\n"
-    base += "=== FIELD JOURNAL ===\n"
+    base = "=== Field Journal ===\n"
     base += "Discovered: %d/%d\n\n" % (len(journal_entries), total)
 
     if journal_entries:
         for e in journal_entries:
-            base += "  * %s (%s)\n" % (e["name"], e["category"])
-            base += "      %s\n\n" % e["description"]
+            base += "* %s (%s)\n" % (e["name"], e["category"])
+            base += "    %s\n\n" % e["description"]
     else:
-        base += "  You haven't discovered anything yet.\n"
-        base += "  Find the glowing markers and press E to collect them.\n"
+        base += "You haven't discovered anything yet.\n"
+        base += "Find the glowing markers and press E to collect them.\n"
 
     return text_surface(base, colour=(220, 220, 200), spacing=2)
 
@@ -295,98 +294,19 @@ def draw_text_overlay(surface, texture_id, tex_w, tex_h, overlay_alpha=0.7):
 
 
 def draw_help(surface):
-    """Draw the help text overlay with yellow close prompt at top."""
-    global help_page, help_flash_timer
-    page_surf = _HELP_PAGE_SURFACES[help_page]
-    
+    """Draw the help text overlay with paging."""
+    global help_page
+    page_text = HELP_PAGES[help_page]
+    page_surf = text_surface(page_text, colour=(200, 200, 200), spacing=2)
     if use_opengl:
-        import OpenGL.GL as gl
-        # Get or create cached texture for page
-        if help_page not in _HELP_TEX_CACHE:
-            _HELP_TEX_CACHE[help_page] = _surface_to_texture(page_surf, None)
-        tex_id = _HELP_TEX_CACHE[help_page]
-        
-        # Flash effect: brighter close prompt when flash timer active
-        flash_colour = (255, 255, 180) if help_flash_timer > 0.0 else (255, 230, 80)
-        close_surf = text_surface("Press H to close", colour=flash_colour, spacing=2)
-        if 0 not in _HELP_CLOSE_TEX_CACHE:
-            _HELP_CLOSE_TEX_CACHE[0] = _surface_to_texture(close_surf, None)
-        else:
-            _HELP_CLOSE_TEX_CACHE[0] = _surface_to_texture(close_surf, _HELP_CLOSE_TEX_CACHE[0])
-        close_tex_id = _HELP_CLOSE_TEX_CACHE[0]
-        
-        # Draw dark overlay background
-        gl.glDisable(gl.GL_DEPTH_TEST)
-        gl.glMatrixMode(gl.GL_PROJECTION)
-        gl.glPushMatrix()
-        gl.glLoadIdentity()
-        gl.glOrtho(0, WIDTH, HEIGHT, 0, -1, 1)
-        gl.glMatrixMode(gl.GL_MODELVIEW)
-        gl.glPushMatrix()
-        gl.glLoadIdentity()
-        gl.glEnable(gl.GL_BLEND)
-        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-        
-        gl.glColor4f(0.0, 0.0, 0.0, 0.75)
-        gl.glBegin(gl.GL_QUADS)
-        gl.glVertex2f(0, 0)
-        gl.glVertex2f(WIDTH, 0)
-        gl.glVertex2f(WIDTH, HEIGHT)
-        gl.glVertex2f(0, HEIGHT)
-        gl.glEnd()
-        
-        # Draw close prompt at top (centered)
-        cw = close_surf.get_width()
-        ch = close_surf.get_height()
-        ctx = (WIDTH - cw) // 2
-        cty = 40  # top of screen
-        
-        gl.glEnable(gl.GL_TEXTURE_2D)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, close_tex_id)
-        gl.glColor4f(1.0, 1.0, 1.0, 1.0)
-        gl.glBegin(gl.GL_QUADS)
-        gl.glTexCoord2f(0, 1); gl.glVertex2f(ctx, cty)
-        gl.glTexCoord2f(1, 1); gl.glVertex2f(ctx + cw, cty)
-        gl.glTexCoord2f(1, 0); gl.glVertex2f(ctx + cw, cty + ch)
-        gl.glTexCoord2f(0, 0); gl.glVertex2f(ctx, cty + ch)
-        gl.glEnd()
-        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-        gl.glDisable(gl.GL_TEXTURE_2D)
-        
-        # Draw main help text below close prompt
-        tw = page_surf.get_width()
-        th = page_surf.get_height()
-        tx = (WIDTH - tw) // 2
-        ty = cty + ch + 30  # below close prompt with spacing
-        
-        gl.glEnable(gl.GL_TEXTURE_2D)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
-        gl.glColor4f(1.0, 1.0, 1.0, 1.0)
-        gl.glBegin(gl.GL_QUADS)
-        gl.glTexCoord2f(0, 1); gl.glVertex2f(tx, ty)
-        gl.glTexCoord2f(1, 1); gl.glVertex2f(tx + tw, ty)
-        gl.glTexCoord2f(1, 0); gl.glVertex2f(tx + tw, ty + th)
-        gl.glTexCoord2f(0, 0); gl.glVertex2f(tx, ty + th)
-        gl.glEnd()
-        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-        gl.glDisable(gl.GL_TEXTURE_2D)
-        
-        gl.glPopMatrix()
-        gl.glMatrixMode(gl.GL_PROJECTION)
-        gl.glPopMatrix()
-        gl.glMatrixMode(gl.GL_MODELVIEW)
-        gl.glEnable(gl.GL_DEPTH_TEST)
+        tex_id = _surface_to_texture(page_surf, None)
+        draw_text_overlay(surface, tex_id, page_surf.get_width(), page_surf.get_height(), 0.7)
     else:
         s = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         s.fill((0, 0, 0, 180))
         surface.blit(s, (0, 0))
-        # Draw close prompt at top
-        flash_colour = (255, 255, 180) if help_flash_timer > 0.0 else (255, 230, 80)
-        close_surf = text_surface("Press H to close", colour=flash_colour, spacing=2)
-        surface.blit(close_surf, ((WIDTH - close_surf.get_width()) // 2, 40))
-        # Draw main help text
         x = (WIDTH - page_surf.get_width()) // 2
-        y = 40 + close_surf.get_height() + 30
+        y = (HEIGHT - page_surf.get_height()) // 2
         surface.blit(page_surf, (x, y))
 
 
@@ -417,19 +337,11 @@ def draw_journal(surface):
 
 
 def draw_notification(surface):
-    """Draw the transient collection notification (cached texture)."""
-    global notification, notification_timer, _notification_cache
+    """Draw the transient collection notification."""
+    global notification, notification_timer
     if not notification:
         return
-    # Check cache - only rebuild if text changed
-    if _notification_cache is None or _notification_cache[0] != notification:
-        font_surf = text_surface(notification, colour=(240, 240, 180), spacing=2)
-        tex_id = _surface_to_texture(font_surf, None)
-        _notification_cache = (notification, font_surf, tex_id)
-    
-    font_surf = _notification_cache[1]
-    tex_id = _notification_cache[2]
-    
+    font_surf = text_surface(notification, colour=(240, 240, 180), spacing=2)
     if use_opengl:
         import OpenGL.GL as gl
         gl.glDisable(gl.GL_DEPTH_TEST)
@@ -455,6 +367,7 @@ def draw_notification(surface):
         gl.glVertex2f(bx, by + bh)
         gl.glEnd()
 
+        tex_id = _surface_to_texture(font_surf, None)
         gl.glEnable(gl.GL_TEXTURE_2D)
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
         gl.glColor4f(1.0, 1.0, 1.0, 1.0)
@@ -482,16 +395,8 @@ def draw_notification(surface):
 
 
 def draw_hud(surface):
-    """Draw the health & stamina bars, FPS counter, and a red damage vignette."""
-    global hurt_timer, _fps_accumulator, _fps_frame_count, _fps_display
-
-    # Update FPS counter
-    _fps_accumulator += clock.get_time()
-    _fps_frame_count += 1
-    if _fps_accumulator >= 500.0:  # update every 500ms
-        _fps_display = int(_fps_frame_count * 1000.0 / _fps_accumulator)
-        _fps_accumulator = 0.0
-        _fps_frame_count = 0
+    """Draw the health & stamina bars and a red damage vignette."""
+    global hurt_timer
 
     BW, BH = 260.0, 20.0
     BX, BY = 30.0, 28.0
@@ -533,26 +438,6 @@ def draw_hud(surface):
         quad(BX, sy, BW, BH, (40, 40, 40), 0.9)
         quad(BX, sy, BW * sf, BH, scol)
 
-        # FPS counter (top-right)
-        fps_text = text_surface("FPS: %d" % _fps_display, colour=(180, 220, 180), spacing=1)
-        fps_x = WIDTH - fps_text.get_width() - 20
-        fps_y = 20
-        # Background for FPS
-        quad(fps_x - 8, fps_y - 4, fps_text.get_width() + 16, fps_text.get_height() + 8, (0, 0, 0), 0.5)
-        # Draw FPS text as texture
-        fps_tex = _surface_to_texture(fps_text, None)
-        gl.glEnable(gl.GL_TEXTURE_2D)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, fps_tex)
-        gl.glColor4f(1.0, 1.0, 1.0, 1.0)
-        gl.glBegin(gl.GL_QUADS)
-        gl.glTexCoord2f(0, 1); gl.glVertex2f(fps_x, fps_y)
-        gl.glTexCoord2f(1, 1); gl.glVertex2f(fps_x + fps_text.get_width(), fps_y)
-        gl.glTexCoord2f(1, 0); gl.glVertex2f(fps_x + fps_text.get_width(), fps_y + fps_text.get_height())
-        gl.glTexCoord2f(0, 0); gl.glVertex2f(fps_x, fps_y + fps_text.get_height())
-        gl.glEnd()
-        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-        gl.glDisable(gl.GL_TEXTURE_2D)
-
         # Red vignette while recently hurt - stronger at low health
         health_ratio = camera.health / camera.max_health
         hurt_alpha = min(0.7, hurt_timer * 1.8)
@@ -581,9 +466,6 @@ def draw_hud(surface):
         pygame.draw.rect(surface, (0, 0, 0), (BX - 3, sy - 3, BW + 6, BH + 6))
         pygame.draw.rect(surface, (60, 60, 60), (BX, sy, BW, BH))
         pygame.draw.rect(surface, scol, (BX, sy, BW * sf, BH))
-        # FPS counter
-        fps_surf = text_surface("FPS: %d" % _fps_display, colour=(180, 220, 180), spacing=1)
-        surface.blit(fps_surf, (WIDTH - fps_surf.get_width() - 20, 20))
 
     # Interaction prompt (Press E - ...)
     draw_interaction_prompt(surface)
@@ -703,31 +585,30 @@ def try_craft(recipe_id):
 
 
 def _build_inventory_surface():
-    base = "[I] Close\n\n"
-    base += "=== INVENTORY ===\n\n"
+    base = "=== Inventory ===\n"
+    base += "UP/DOWN to select, Enter to hold/use, Q to use item, I to close.\n\n"
     entries = player_inventory.listed()
     if not entries:
-        base += "  Your pack is empty.\n"
-        base += "  Collect wood, stone and fibre.\n"
+        base += "Your pack is empty.\n"
+        base += "Collect wood, stone and fibre around the outback.\n"
     else:
         sel = min(inventory_sel_index, len(entries) - 1)
         for idx, (item_id, name, category, qty) in enumerate(entries):
             marker = ">" if idx == sel else " "
             held = " [HELD]" if player_inventory.held_item == item_id else ""
-            base += "  %s %-16s x%d  (%s)%s\n" % (marker, name, qty, category, held)
-    base += "\n  Slots: %d/%d\n" % (len(player_inventory.slots),
+            base += "%s %s  x%d  (%s)%s\n" % (marker, name, qty, category, held)
+    base += "\nSlots: %d/%d\n" % (len(player_inventory.slots),
                                   player_inventory.capacity)
     if player_inventory.held_item:
-        base += "  Held: %s\n" % ITEMS[player_inventory.held_item][0]
+        base += "\nHeld: %s\n" % ITEMS[player_inventory.held_item][0]
     else:
-        base += "  Held: none\n"
-    base += "\n  UP/DOWN ... Select\n  Enter ..... Hold/Use\n  Q ......... Use Item"
+        base += "\nHeld: none\n"
     return text_surface(base, colour=(200, 210, 190), spacing=2)
 
 
 def _build_crafting_surface():
-    base = "[C] Close\n\n"
-    base += "=== CRAFTING ===\n\n"
+    base = "=== Crafting (camp) ===\n"
+    base += "Select with W/S, craft with E, close with C.\n\n"
     for idx, rid in enumerate(RECIPE_ORDER):
         rec = RECIPES[rid]
         marker = ">" if idx == crafting_index else " "
@@ -735,8 +616,7 @@ def _build_crafting_surface():
                           for ii, q in rec["materials"].items())
         can = all(player_inventory.has(ii, q) for ii, q in rec["materials"].items())
         status = "[craft]" if can else "[need ]"
-        base += "  %s %s  %-16s  %s\n" % (marker, status, rec["name"], mats)
-    base += "\n  UP/DOWN ... Select\n  Enter ..... Craft"
+        base += "%s %s  %-16s  %s\n" % (marker, status, rec["name"], mats)
     return text_surface(base, colour=(200, 220, 180), spacing=2)
 
 
@@ -756,20 +636,12 @@ def _draw_panel(surface, panel_surface, alpha=0.78):
 
 
 def draw_interaction_prompt(surface):
-    """Draw the contextual Press-E hint near the bottom of the screen (cached)."""
-    global interaction_prompt, _prompt_cache
+    """Draw the contextual Press-E hint near the bottom of the screen."""
+    global interaction_prompt
     if not interaction_prompt or show_help or show_journal or show_crafting or show_inventory:
         return
     hint = "Press E - %s" % interaction_prompt
-    # Check cache - only rebuild if text changed
-    if _prompt_cache is None or _prompt_cache[0] != hint:
-        font_surf = text_surface(hint, colour=(230, 220, 170), spacing=1)
-        texid = _surface_to_texture(font_surf, None)
-        _prompt_cache = (hint, font_surf, texid)
-    
-    font_surf = _prompt_cache[1]
-    texid = _prompt_cache[2]
-    
+    font_surf = text_surface(hint, colour=(230, 220, 170), spacing=1)
     if use_opengl:
         import OpenGL.GL as gl
         gl.glDisable(gl.GL_DEPTH_TEST)
@@ -787,6 +659,7 @@ def draw_interaction_prompt(surface):
         gl.glVertex2f(bx, by); gl.glVertex2f(bx + bw, by)
         gl.glVertex2f(bx + bw, by + bh); gl.glVertex2f(bx, by + bh)
         gl.glEnd()
+        texid = _surface_to_texture(font_surf, None)
         gl.glEnable(gl.GL_TEXTURE_2D)
         gl.glBindTexture(gl.GL_TEXTURE_2D, texid)
         gl.glColor4f(1, 1, 1, 1)
@@ -833,19 +706,13 @@ while running:
                 show_help = not show_help
                 if show_help:
                     help_page = 0
-                    help_flash_timer = 0.3
 
             # Help page navigation
             if show_help and pygame.event.get_grab():
                 if event.key == pygame.K_UP:
                     help_page = (help_page - 1) % len(HELP_PAGES)
-                    help_flash_timer = 0.3
                 elif event.key == pygame.K_DOWN:
                     help_page = (help_page + 1) % len(HELP_PAGES)
-                    help_flash_timer = 0.3
-                else:
-                    # Any other key also flashes the close prompt
-                    help_flash_timer = 0.3
 
             if event.key == pygame.K_F11:
                 toggle_fullscreen()
@@ -927,12 +794,8 @@ while running:
     camera.update(dt)
 
     # Stream chunks around the player and refresh collision obstacles
-    # Only update when player crosses a chunk boundary (performance optimization)
-    current_chunk = chunk_manager.chunk_at(camera.x, camera.z)
-    if _last_chunk_pos != current_chunk:
-        chunk_manager.update(camera.x, camera.z)
-        camera.obstacles = chunk_manager.all_obstacles()
-        _last_chunk_pos = current_chunk
+    chunk_manager.update(camera.x, camera.z)
+    camera.obstacles = chunk_manager.all_obstacles()
 
     # Update emus (FSM) and apply any kick damage to the player
     for emu in emus:
@@ -971,16 +834,11 @@ while running:
     if damage_notice_cd > 0.0:
         damage_notice_cd -= dt
 
-    # Decay help flash timer
-    if help_flash_timer > 0.0:
-        help_flash_timer -= dt
-
     # Decay notification
     if notification_timer > 0.0:
         notification_timer -= dt
         if notification_timer <= 0.0:
             notification = None
-            _notification_cache = None
 
     # Update contextual interaction prompt
     _ip = find_interactable()
@@ -994,40 +852,21 @@ while running:
 
         renderer.render_frame(camera, chunk_manager.all_batches())
 
-        # Render kangaroos as camera-facing billboards (with distance culling)
+        # Render kangaroos as camera-facing billboards
         for kangaroo in kangaroos:
-            # Distance culling - skip if too far
-            dx = kangaroo.x - camera.x
-            dz = kangaroo.z - camera.z
-            if dx * dx + dz * dz > RENDER_DISTANCE_WILDLIFE * RENDER_DISTANCE_WILDLIFE:
-                continue
             surf, kx, ky, kz, w, h = kangaroo.billboard(camera.x, camera.z)
             if surf is not None:
                 renderer.render_billboard(camera, surf, kx, ky, kz, w, h)
 
-        # Render emus as camera-facing billboards (with distance culling)
+        # Render emus as camera-facing billboards
         for emu in emus:
-            # Distance culling - skip if too far
-            dx = emu.x - camera.x
-            dz = emu.z - camera.z
-            if dx * dx + dz * dz > RENDER_DISTANCE_WILDLIFE * RENDER_DISTANCE_WILDLIFE:
-                continue
             surf, ex, ey, ez, w, h = emu.billboard(camera.x, camera.z)
             renderer.render_billboard(camera, surf, ex, ey, ez, w, h)
 
-        # Render resource nodes (cached meshes + distance culling)
+        # Render resource nodes (build coloured cube mesh on-the-fly)
         for res in chunk_manager.all_resources():
-            # Distance culling - skip if too far
-            dx = res["x"] - camera.x
-            dz = res["z"] - camera.z
-            if dx * dx + dz * dz > RENDER_DISTANCE_RESOURCES * RENDER_DISTANCE_RESOURCES:
-                continue
-            # Use cached mesh or create new one
-            item_id = res["item_id"]
-            if item_id not in _resource_mesh_cache:
-                _resource_mesh_cache[item_id] = create_resource(
-                    (res["x"], res["y"], res["z"]), item_id)
-            mesh = _resource_mesh_cache[item_id]
+            mesh = create_resource((res["x"], res["y"], res["z"]),
+                                   res["item_id"])
             renderer.render_mesh_dynamic(
                 camera, mesh, res["x"], res["y"], res["z"])
 

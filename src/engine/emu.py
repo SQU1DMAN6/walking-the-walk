@@ -112,16 +112,16 @@ def _draw_emu(g, direction, lift):
         _ellipse(g, 15.5, 30, 8.0, 5.5, _FEATHER)
         _ellipse(g, 15.5, 28.5, 6.0, 3.5, _FEATHER_LT)
         _feather_body(g, 15.5, 30)
-        # Full, feathered neck rising from the top of the body
-        _thick_line(g, 15, 24, 15, 14, 2.6, _FEATHER)
-        # Small head
+        # Shorter neck: from y=24 to y=17 (7 units instead of 10)
+        _thick_line(g, 15, 24, 15, 17, 2.4, _FEATHER)
+        # Small head positioned higher and more forward
         head_c = _FEATHER_DK if direction == "back" else _FEATHER
-        _ellipse(g, 15, 11, 3.4, 3.6, head_c)
+        _ellipse(g, 15, 14.5, 3.4, 3.6, head_c)
         if direction == "front":
             # Two eyes and a small forward-pointing beak
-            _px(g, 13.2, 10, _EYE)
-            _px(g, 16.8, 10, _EYE)
-            _thick_line(g, 15, 13.5, 15, 15.5, 1.6, _BEAK)
+            _px(g, 13.2, 14, _EYE)
+            _px(g, 16.8, 14, _EYE)
+            _thick_line(g, 15, 17, 15, 19.5, 1.6, _BEAK)
         if direction == "back":
             # Fluffy rear rump visible from behind
             _rump_tufts(g, 15, 30)
@@ -139,15 +139,14 @@ def _draw_emu(g, direction, lift):
         rx = body_cx - f * 7.0
         _ellipse(g, rx, 31, 4.0, 2.5, _FEATHER_DK)
         _rump_tufts(g, rx, 31)
-        # Curved, feathered neck up and forward to the head (gentle S-curve)
-        hx = body_cx + f * 9.0
-        _thick_line(g, body_cx - f * 4.0, 26, body_cx - f * 6.0, 18, 2.2, _FEATHER)
-        _thick_line(g, body_cx - f * 6.0, 18, body_cx - f * 7.5, 13, 1.8, _FEATHER)
-        _thick_line(g, body_cx - f * 7.5, 13, hx, 11, 1.6, _FEATHER)
+        # Straighter, shorter neck (less S-curve, more upright)
+        hx = body_cx + f * 8.0
+        _thick_line(g, body_cx - f * 3.0, 26, body_cx - f * 2.0, 20, 2.2, _FEATHER)
+        _thick_line(g, body_cx - f * 2.0, 20, hx, 16, 1.8, _FEATHER)
         # Head + beak + eye (beak extends forward along the facing direction)
-        _ellipse(g, hx, 11, 3.4, 3.6, _FEATHER)
-        _thick_line(g, hx + f * 3.0, 12.0, hx + f * 4.3, 12.6, 2.0, _BEAK)
-        _px(g, hx + f * 1.6, 10.5, _EYE)
+        _ellipse(g, hx, 14.5, 3.4, 3.6, _FEATHER)
+        _thick_line(g, hx + f * 3.0, 15.5, hx + f * 4.3, 16.2, 2.0, _BEAK)
+        _px(g, hx + f * 1.6, 14.5, _EYE)
         # Legs under the body
         _draw_legs(g, (body_cx - 2.5, body_cx + 2.5), lift)
 
@@ -185,26 +184,31 @@ def build_emu_sprites():
 # Emu entity
 
 class Emu(Entity):
-    """An emu that roams, detects the player and flees.
+    """An emu that roams, detects the player and can be very aggressive.
 
     Rendered as a camera-facing billboard sprite.
     """
 
     def __init__(self, x, y, z, seed=0):
-        super().__init__(x, y, z, speed=2.8, detection_range=12.0)
+        super().__init__(x, y, z, speed=3.2, detection_range=15.0)
         self.rng = random.Random(seed)
         self.state = "idle"
         self.timer = 0.0
 
-        # Temperament: emus are bold and prone to chase; a minority flee.
-        self.aggressive = self.rng.random() < 0.65
+        # Temperament: most emus are bold and prone to chase; only a small minority flee.
+        self.aggressive = self.rng.random() < 0.85
 
         # Attack cycle
-        self.kick_range = 1.6
+        self.kick_range = 2.0
         self.kick_damage = 22.0
         self.attack_timer = 0.0
         self.retreat_timer = 0.0
         self._damage = 0.0  # unresolved kick damage for this frame
+        
+        # Tracking: remember last known player position for persistent pursuit
+        self.last_player_x = x
+        self.last_player_z = z
+        self.tracking_timer = 0.0
 
         # Facing direction (cosmetic; billboard comes from camera position)
         self.yaw = self.rng.uniform(0, math.pi * 2)
@@ -259,17 +263,31 @@ class Emu(Entity):
     def update(self, dt, player_x, player_z):
         """Advance the emu's finite-state machine.
 
-        States: idle, wander, observe, investigate, flee, attack, retreat.
+        States: idle, wander, observe, investigate, chase, flee, attack, retreat.
         Transitions depend mainly on distance to the player (plus the emu's
-        temperament); randomness only influences idle/wander picks.
+        temperament); aggressive emus track and pursue persistently.
         """
         dist = self.distance_to(player_x, player_z)
+        
+        # Update last known player position for tracking
+        if dist < self.detection_range * 1.5:
+            self.last_player_x = player_x
+            self.last_player_z = player_z
+            self.tracking_timer = 3.0  # remember for 3 seconds
+        else:
+            self.tracking_timer -= dt
 
         if self.state in ("attack", "retreat"):
             self._attack_cycle(dt, player_x, player_z)
-            if dist > self.detection_range * 2.2:
-                self.state = "idle"
-                self.timer = self.rng.uniform(1.0, 2.0)
+            # Aggressive emus are persistent: only stop if player is far away
+            if self.aggressive:
+                if dist > self.detection_range * 3.0 and self.tracking_timer <= 0.0:
+                    self.state = "idle"
+                    self.timer = self.rng.uniform(1.0, 2.0)
+            else:
+                if dist > self.detection_range * 2.2:
+                    self.state = "idle"
+                    self.timer = self.rng.uniform(1.0, 2.0)
             return
 
         # --- Choose a behaviour based on distance to the player ---
@@ -281,10 +299,10 @@ class Emu(Entity):
         elif dist < self.detection_range:
             if self.aggressive:
                 # Bold emus chase readily and attack at range
-                if dist < 6.0:
+                if dist < 5.0:
                     self.state = "attack"
                     self.attack_timer = 0.15
-                elif dist < 11.0:
+                elif dist < 10.0:
                     self.state = "chase"
                 else:
                     self.state = "observe"
@@ -298,6 +316,17 @@ class Emu(Entity):
                 else:
                     self.state = "observe"
                     self.timer = self.rng.uniform(0.4, 0.8)
+        elif self.tracking_timer > 0.0 and self.aggressive:
+            # Track to last known position even if player is out of direct detection
+            track_dist = math.sqrt(
+                (self.last_player_x - self.x) ** 2 +
+                (self.last_player_z - self.z) ** 2
+            )
+            if track_dist > 1.5:
+                self.state = "chase"
+            else:
+                self.state = "observe"
+                self.timer = self.rng.uniform(0.5, 1.0)
         else:
             # Player out of range: calm down
             if self.state in ("observe", "investigate", "flee", "chase"):
@@ -309,8 +338,12 @@ class Emu(Entity):
         if self.state == "observe":
             moving = False  # stand still and watch
         elif self.state == "chase":
-            # Actively pursue the fleeing player
-            self._move(self._angle_to_player(player_x, player_z),
+            # Actively pursue - either directly toward player or to last known position
+            if self.tracking_timer > 0.0 and dist < self.detection_range * 1.5:
+                target_x, target_z = player_x, player_z
+            else:
+                target_x, target_z = self.last_player_x, self.last_player_z
+            self._move(self._angle_to_player(target_x, target_z),
                        self.speed * 2.0, dt)
             moving = True
         elif self.state == "investigate":

@@ -12,11 +12,14 @@ class Inventory:
     slots is a list of [item_id, quantity] pairs. Items of the same id stack
     up to their max stack size. Adding beyond capacity returns the leftover
     quantity that could not fit.
+
+    Only ONE item can be held at a time (held_item is an item_id or None).
     """
 
     def __init__(self, capacity=DEFAULT_CAPACITY):
         self.capacity = capacity
         self.slots = []  # list of [item_id, qty]
+        self.held_item = None  # item_id of the single held item (or None)
 
     def count(self, item_id):
         """Total quantity of item_id currently held."""
@@ -63,6 +66,17 @@ class Inventory:
                 if qty <= 0:
                     return True
         return True
+
+    def hold(self, item_id):
+        """Hold a single item. Clears any previously held item."""
+        if self.count(item_id) > 0:
+            self.held_item = item_id
+            return True
+        return False
+
+    def release(self):
+        """Release the held item."""
+        self.held_item = None
 
     def listed(self):
         """Return slots as [(item_id, name, category, qty)] for UI display."""

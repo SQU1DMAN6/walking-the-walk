@@ -27,14 +27,25 @@ _WIDTH, _HEIGHT, _BYTES_PER_GLYPH, _GLYPHS = _parse_psf2(_FONT_DATA)
 _BYTES_PER_ROW = (_WIDTH + 7) // 8
 
 def text_surface(text, colour=(200, 200, 200), spacing=4):
+    """Render text to a pygame Surface using the embedded PSF2 font.
+
+    Uses a flat bytearray buffer for bulk pixel writes instead of the
+    extremely slow Surface.set_at() per-pixel call.  This moves the
+    glyph rasterisation into a tight Python loop writing directly into a
+    contiguous bytearray, then uploads the whole buffer at once via
+    pygame.image.frombuffer — a dramatic speed-up that keeps the CPU
+    free for the 3D render loop.
+    """
     if not text:
         return pygame.Surface((0, 0), pygame.SRCALPHA)
     lines = text.split("\n")
     max_len = max(len(l) for l in lines) if lines else 0
     total_w = max_len * (_WIDTH + spacing) + spacing
     total_h = len(lines) * (_HEIGHT + 4)
-    surf = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
-    surf.fill((0, 0, 0, 0))
+
+    r, g, b = colour
+    buf = bytearray(total_w * total_h * 4)
+
     for li, line in enumerate(lines):
         y = li * (_HEIGHT + 4)
         x = spacing
@@ -44,12 +55,20 @@ def text_surface(text, colour=(200, 200, 200), spacing=4):
                 glyph = _GLYPHS[code]
                 for row in range(_HEIGHT):
                     row_start = row * _BYTES_PER_ROW
+                    py = y + row
+                    if py >= total_h:
+                        continue
+                    py_row = py * total_w * 4
                     for col in range(_WIDTH):
                         byte_idx = row_start + col // 8
                         if byte_idx < len(glyph) and (glyph[byte_idx] & (0x80 >> (col % 8))):
                             px = x + col
-                            py = y + row
-                            if 0 <= px < total_w and 0 <= py < total_h:
-                                surf.set_at((px, py), colour)
+                            if px < total_w:
+                                idx = py_row + px * 4
+                                buf[idx] = r
+                                buf[idx + 1] = g
+                                buf[idx + 2] = b
+                                buf[idx + 3] = 255
             x += _WIDTH + spacing
-    return surf
+
+    return pygame.image.frombuffer(bytes(buf), (total_w, total_h), "RGBA")
