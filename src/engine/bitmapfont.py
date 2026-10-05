@@ -1,5 +1,6 @@
-"""Bitmap font renderer - KernosTerminal 16x32 PSF2 font embedded.
-No file I/O at runtime, no pygame.font dependency."""
+"""
+Embed QT's legendary 16x32 Kernos Terminal PSF2 font for the purpose of rendering fonts in this game.
+"""
 import base64
 import struct
 import pygame
@@ -27,15 +28,6 @@ _WIDTH, _HEIGHT, _BYTES_PER_GLYPH, _GLYPHS = _parse_psf2(_FONT_DATA)
 _BYTES_PER_ROW = (_WIDTH + 7) // 8
 
 def text_surface(text, colour=(200, 200, 200), spacing=4):
-    """Render text to a pygame Surface using the embedded PSF2 font.
-
-    Uses a flat bytearray buffer for bulk pixel writes instead of the
-    extremely slow Surface.set_at() per-pixel call.  This moves the
-    glyph rasterisation into a tight Python loop writing directly into a
-    contiguous bytearray, then uploads the whole buffer at once via
-    pygame.image.frombuffer — a dramatic speed-up that keeps the CPU
-    free for the 3D render loop.
-    """
     if not text:
         return pygame.Surface((0, 0), pygame.SRCALPHA)
     lines = text.split("\n")

@@ -12,8 +12,11 @@ ITEMS = {
     "water":           ("Water",           "Water",     3),
     "stone_tool":      ("Stone Tool",      "Tool",      1),
     "spear":           ("Wooden Spear",    "Tool",      1),
+    "axe":             ("Stone Axe",       "Tool",      1),
+    "pickaxe":         ("Stone Pickaxe",   "Tool",      1),
     "bandage":         ("Bandage",         "Medical",   5),
     "crafting_table":  ("Crafting Table",  "Furniture", 1),
+    "didgeridoo":      ("Legendary Didgeridoo", "Legendary", 1),
 }
 
 
@@ -44,6 +47,18 @@ RECIPES = {
         "output": "spear",
         "quantity": 1,
     },
+    "axe": {
+        "name": "Stone Axe",
+        "materials": {"wood": 2, "stone": 2},
+        "output": "axe",
+        "quantity": 1,
+    },
+    "pickaxe": {
+        "name": "Stone Pickaxe",
+        "materials": {"wood": 2, "stone": 3},
+        "output": "pickaxe",
+        "quantity": 1,
+    },
     "bandage": {
         "name": "Bandage",
         "materials": {"fibre": 2, "bark": 1},
@@ -53,4 +68,4 @@ RECIPES = {
 }
 
 
-RECIPE_ORDER = ["crafting_table", "rope", "stone_tool", "spear", "bandage"]
+RECIPE_ORDER = ["crafting_table", "rope", "stone_tool", "axe", "pickaxe", "spear", "bandage"]

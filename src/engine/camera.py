@@ -22,8 +22,8 @@ class Camera:
         # Player vitals
         self.max_health = 100.0
         self.health = 100.0
-        self.max_stamina = 100.0
-        self.stamina = 100.0
+        self.max_stamina = 200.0
+        self.stamina = 200.0
         self.exhausted = False    # winded: sprint disabled until stamina regens
         self.window_center = None # (width, height) set by the game loop
         self.grab_active = False  # whether the mouse is grabbed (in-game)
@@ -129,12 +129,12 @@ class Camera:
         # Stamina drain scales: slower at 100%, faster as it depletes
         if sprinting:
             drain_factor = 0.5 + 0.5 * (1.0 - self.stamina / self.max_stamina)
-            self.stamina = max(0.0, self.stamina - 22.0 * dt * (0.7 + 0.3 * drain_factor))
+            self.stamina = max(0.0, self.stamina - 12.0 * dt * (0.7 + 0.3 * drain_factor))
         elif n > 0.0 and self.stamina < 20.0:
             # Walking with low stamina still drains slowly
-            self.stamina = max(0.0, self.stamina - 3.0 * dt)
+            self.stamina = max(0.0, self.stamina - 1.0 * dt)
         else:
-            self.stamina = min(self.max_stamina, self.stamina + 14.0 * dt)
+            self.stamina = min(self.max_stamina, self.stamina + 25.0 * dt)
         
         self.exhausted = want_sprint and self.stamina <= 0.0
         self.sprinting = sprinting

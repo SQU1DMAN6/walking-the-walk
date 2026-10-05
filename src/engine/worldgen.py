@@ -152,13 +152,92 @@ def _create_foliage_cluster(position, rx, ry, rz, colour):
     return Mesh(verts, faces, colour, position)
 
 
-def _create_branch(start, end, width, colour):
-    """Create a 6-triangle branch from start to end.
+def create_spear(start, end, colour):
+    """Create a stone-tipped spear mesh.
 
-    Uses a triangular prism cross-section for thickness and visible
-    branch structure. The branch has a top edge and two bottom edges
-    so it looks like a rounded/angular stick.
+    Parameters
+    ----------
+    start : (float, float, float)
+        Butt end of the spear shaft.
+    end : (float, float, float)
+        Tip end of the spear shaft (before the stone head).
+    colour : (int, int, int)
+        RGB tuple for the wooden shaft. The stone head is grey.
+
+    Returns
+    -------
+    Mesh
+        A Mesh with position=(0, 0, 0) that can be placed via renderer.
     """
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    dz = end[2] - start[2]
+    length = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if length < 1e-6:
+        return Mesh([], [], colour, (0, 0, 0))
+
+    # Shaft radius
+    shaft_radius = 0.04
+    shaft_len = length
+
+    # Build shaft as a cylinder along the +Z axis in local space, then
+    # we'll place the mesh so that its origin is at `start` and it
+    # extends toward `end`.  Simpler: build it along +X from 0..shaft_len.
+    r = shaft_radius
+    L = shaft_len
+    verts = [
+        (0, -r, -r),
+        (0,  r, -r),
+        (0,  r,  r),
+        (0, -r,  r),
+        (L, -r, -r),
+        (L,  r, -r),
+        (L,  r,  r),
+        (L, -r,  r),
+    ]
+    faces = [
+        (0, 1, 2), (0, 2, 3),  # back end cap
+        (4, 6, 5), (4, 7, 6),  # front end cap
+        (0, 4, 5), (0, 5, 1),  # top
+        (1, 5, 6), (1, 6, 2),  # right
+        (2, 6, 7), (2, 7, 3),  # bottom
+        (3, 7, 4), (3, 4, 0),  # left
+    ]
+
+    shaft_mesh = Mesh(verts, faces, colour, (0, 0, 0))
+
+    # Stone head: a small icosahedron-ish cluster at the tip (end of shaft)
+    head_size = 0.12
+    head_verts = []
+    head_faces = []
+    # Simple octahedron stone head centred at (L, 0, 0)
+    hx, hy, hz = L, 0.0, 0.0
+    hr = head_size
+    head_verts = [
+        (hx + hr, hy, hz),
+        (hx - hr, hy, hz),
+        (hx, hy + hr, hz),
+        (hx, hy - hr, hz),
+        (hx, hy, hz + hr),
+        (hx, hy, hz - hr),
+    ]
+    head_faces = [
+        (0, 2, 4), (0, 4, 3), (0, 3, 5), (0, 5, 2),
+        (1, 4, 2), (1, 3, 4), (1, 5, 3), (1, 2, 5),
+    ]
+    head_mesh = Mesh(head_verts, head_faces, (160, 160, 150), (0, 0, 0))
+
+    # We need a single mesh that includes both shaft and head.
+    # Easiest: translate head verts into shaft verts list and append faces
+    # with offset.
+    offset = len(verts)
+    verts.extend(head_mesh.vertices)
+    faces.extend(tuple(v + offset for v in f) for f in head_mesh.faces)
+
+    return Mesh(verts, faces, colour, (0, 0, 0))
+
+
+def create_branch(start, end, width, colour):
     dx = end[0] - start[0]
     dy = end[1] - start[1]
     dz = end[2] - start[2]
@@ -224,24 +303,6 @@ def _create_branch(start, end, width, colour):
 
 
 def create_tree(position, seed, base_height=4.0):
-    """Create an Australian eucalyptus-style tree.
-
-    Structure:
-        trunk (thick, dominant, 25-40% of total height)
-        + 5-10 major branches extending outward
-        + 6-14 foliage clusters at branch tips
-
-    Design principles (per SPEC_2026-07-27.md):
-        - irregular silhouette
-        - sparse canopy with 30-60% negative space
-        - visible trunk structure
-        - asymmetrical branch distribution
-        - flattened/rounded crown (not a cone)
-
-    Returns:
-        list of Mesh objects: [trunk, branch_1, ..., branch_n,
-                               cluster_1, ..., cluster_n]
-    """
     rng = random.Random(seed)
 
     # Tree dimensions
@@ -341,7 +402,7 @@ def create_tree(position, seed, base_height=4.0):
         end = (end_x, end_y, end_z)
 
         branch_width = rng.uniform(0.06, 0.18)  # thicker branches
-        branch_mesh = _create_branch(start, end, branch_width, branch_colour)
+        branch_mesh = create_branch(start, end, branch_width, branch_colour)
         if branch_mesh:
             meshes.append(branch_mesh)
 
@@ -357,7 +418,7 @@ def create_tree(position, seed, base_height=4.0):
             fork_end_y = end_y + math.sin(fork_pitch) * fork_len
             fork_end_z = end_z + math.sin(fork_yaw) * math.cos(fork_pitch) * fork_len
             fork_end = (fork_end_x, fork_end_y, fork_end_z)
-            fork_mesh = _create_branch(
+            fork_mesh = create_branch(
                 end, fork_end, branch_width * 0.7, branch_colour
             )
             if fork_mesh:
@@ -557,15 +618,15 @@ def create_camp(position):
     """Meshes for the player camp: a larger, more noticeable camp with fire pit, tent, and tables."""
     mx, my, mz = position
     meshes = []
-    
+
     # Larger fire ring with more stones
     for dx in (-0.8, -0.3, 0.3, 0.8):
         for dz in (-0.8, -0.3, 0.3, 0.8):
             meshes.append(_cube((mx + dx, my + 0.1, mz + dz), 0.2, (100, 95, 90)))
-    
+
     # Central fire pit (glowing orange)
     meshes.append(_cube((mx, my + 0.2, mz), 0.3, (240, 140, 40)))
-    
+
     # Larger tent structure
     tent_col = (140, 100, 75)
     tent_verts = [
@@ -578,7 +639,7 @@ def create_camp(position):
         (1, 2, 5), (1, 5, 4), (2, 0, 3), (2, 3, 5),
     ]
     meshes.append(Mesh(tent_verts, tent_faces, tent_col, (mx + 3.0, my, mz - 1.0)))
-    
+
     # Camp tables (larger, more visible)
     table_col = (160, 120, 80)
     for dx, dz in [(-2.5, -1.5), (-2.5, 1.5), (2.5, -1.5)]:
@@ -586,7 +647,7 @@ def create_camp(position):
         # Table legs
         for ldx, ldz in [(-0.3, -0.3), (0.3, -0.3), (-0.3, 0.3), (0.3, 0.3)]:
             meshes.append(_cube((mx + dx + ldx, my + 0.2, mz + dz + ldz), 0.08, (120, 90, 60)))
-    
+
     return meshes
 
 
@@ -751,25 +812,25 @@ def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
                 ry = get_terrain_height(rx, rz, seed, 1.5)
                 item = "bark" if rng.random() < 0.3 else "wood"
                 pos = (rx, ry + 0.2, rz)
-                resources.append({"x": rx, "y": ry + 0.2, "z": rz,"item_id": item, "qty": 1})
+                resources.append({"x": rx, "y": ry + 0.2, "z": rz, "item_id": item, "qty": 1, "required_tool": "axe"})
         if rng.random() < 0.5:
             rx = tx + rng.uniform(-1.4, 1.4)
             rz = tz + rng.uniform(-1.4, 1.4)
             ry = get_terrain_height(rx, rz, seed, 1.5)
-            resources.append({"x": rx, "y": ry + 0.2, "z": rz, "item_id": "wood", "qty": 1})
+            resources.append({"x": rx, "y": ry + 0.2, "z": rz, "item_id": "wood", "qty": 1, "required_tool": "axe"})
     for rx, rz in rock_positions:
         if rng.random() < 0.7:
             sx = rx + rng.uniform(-0.7, 0.7)
             sz = rz + rng.uniform(-0.7, 0.7)
             sy = get_terrain_height(sx, sz, seed, 1.5)
-            resources.append({"x": sx, "y": sy + 0.2, "z": sz, "item_id": "stone", "qty": 1})
+            resources.append({"x": sx, "y": sy + 0.2, "z": sz, "item_id": "stone", "qty": 1, "required_tool": "pickaxe"})
     for sx, sz in spinifex_positions:
         if rng.random() < 0.5:
             fx = sx + rng.uniform(-0.6, 0.6)
             fz = sz + rng.uniform(-0.6, 0.6)
             fy = get_terrain_height(fx, fz, seed, 1.5)
             item = "bush_tomato" if rng.random() < 0.08 else "fibre"
-            resources.append({"x": fx, "y": fy + 0.2, "z": fz, "item_id": item, "qty": 1})
+            resources.append({"x": fx, "y": fy + 0.2, "z": fz, "item_id": item, "qty": 1, "required_tool": None})
 
     # Discovery landmarks (sparse, deterministic)
     # Only some chunks contain a discovery, so they feel special.

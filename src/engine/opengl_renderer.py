@@ -323,6 +323,7 @@ class OpenGLRenderer:
         uniform vec3 u_fog_color;
         uniform float u_fog_near;
         uniform float u_fog_far;
+        uniform float u_alpha;
 
         in vec3 v_normal;
         in vec2 v_texcoord;
@@ -349,7 +350,7 @@ class OpenGLRenderer:
             // Blend into the warm outback haze with distance
             float fog = clamp((v_viewz - u_fog_near) / (u_fog_far - u_fog_near), 0.0, 1.0);
             final_col = mix(final_col, u_fog_color, fog);
-            f_col = vec4(final_col, 1.0);
+            f_col = vec4(final_col, u_alpha);
         }
         """
 
@@ -390,6 +391,7 @@ class OpenGLRenderer:
         self.fog_color_loc = gl.glGetUniformLocation(self.shader, "u_fog_color")
         self.fog_near_loc = gl.glGetUniformLocation(self.shader, "u_fog_near")
         self.fog_far_loc = gl.glGetUniformLocation(self.shader, "u_fog_far")
+        self.alpha_loc = gl.glGetUniformLocation(self.shader, "u_alpha")
 
         self.leaf_tex_id = _generate_leaf_texture(64)
 
@@ -442,6 +444,7 @@ class OpenGLRenderer:
         gl.glUniform3f(self.fog_color_loc, self.fog_color[0], self.fog_color[1], self.fog_color[2])
         gl.glUniform1f(self.fog_near_loc, self.fog_near)
         gl.glUniform1f(self.fog_far_loc, self.fog_far)
+        gl.glUniform1f(self.alpha_loc, 1.0)
 
     def _define_attribs(self, vbo):
         """Bind a VBO and set the four vertex attribute pointers."""
@@ -592,13 +595,22 @@ class OpenGLRenderer:
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
 
-    def render_mesh_dynamic(self, camera, mesh, x, y, z, yaw=0.0):
+    def render_mesh_dynamic(self, camera, mesh, x, y, z, yaw=0.0, alpha=None):
         """Render a single moving mesh (e.g. an emu) by transforming it in
         Python (rotating around Y and translating), uploading to the dynamic
-        VBO, and drawing. Used for a small number of animated entities."""
+        VBO, and drawing. Used for a small number of animated entities.
+
+        If alpha is None, mesh.alpha is used (default 1.0 = opaque).
+        alpha < 1.0 renders the mesh semi-transparent (blended into the
+        scene) — used for ground guidance rings.
+        """
         data = _transform_dynamic(mesh, x, y, z, yaw)
         if not data:
             return
+
+        if alpha is None:
+            alpha = getattr(mesh, 'alpha', 1.0)
+        transparent = alpha < 1.0
 
         gl.glUseProgram(self.shader)
         self._set_camera_uniforms(camera)
@@ -617,6 +629,11 @@ class OpenGLRenderer:
         colour_array = (gl.GLfloat * 3)(colour[0], colour[1], colour[2])
         gl.glUniform3fv(self.color_loc, 1, colour_array)
         gl.glUniform1i(self.use_texture_loc, 1 if (mesh.texcoords is not None) else 0)
+        gl.glUniform1f(self.alpha_loc, max(0.0, min(1.0, alpha)))
+
+        if transparent:
+            gl.glEnable(gl.GL_BLEND)
+            gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, len(data) // 11)
 

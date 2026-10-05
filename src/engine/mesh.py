@@ -7,6 +7,7 @@ class Mesh:
         position,
         texcoords=None,
         vertex_colours=None,
+        alpha=1.0,
     ):
         self.vertices = vertices
         self.faces = faces
@@ -16,6 +17,9 @@ class Mesh:
         # Optional per-vertex colours (list of (r,g,b) matching vertices).
         # When present, these override the mesh colour for each vertex.
         self.vertex_colours = vertex_colours
+        # Alpha transparency for the whole mesh (0.0 fully transparent,
+        # 1.0 fully opaque). Used by semi-transparent markers.
+        self.alpha = alpha
         # Pre-computed flattened vertex data for GPU upload (set externally)
         self._vertex_data = None
         self._vertex_count = 0

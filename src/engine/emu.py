@@ -189,18 +189,19 @@ class Emu(Entity):
     Rendered as a camera-facing billboard sprite.
     """
 
-    def __init__(self, x, y, z, seed=0):
-        super().__init__(x, y, z, speed=3.2, detection_range=15.0)
+    def __init__(self, x, y, z, seed=0, aggressive=None):
+        super().__init__(x, y, z, speed=4.5, detection_range=20.0)
         self.rng = random.Random(seed)
         self.state = "idle"
         self.timer = 0.0
 
         # Temperament: most emus are bold and prone to chase; only a small minority flee.
-        self.aggressive = self.rng.random() < 0.85
+        # If aggressive is explicitly set, use that; otherwise random.
+        self.aggressive = aggressive if aggressive is not None else (self.rng.random() < 0.9)
 
         # Attack cycle
-        self.kick_range = 2.0
-        self.kick_damage = 22.0
+        self.kick_range = 2.5
+        self.kick_damage = 25.0
         self.attack_timer = 0.0
         self.retreat_timer = 0.0
         self._damage = 0.0  # unresolved kick damage for this frame
@@ -220,10 +221,10 @@ class Emu(Entity):
 
         # Billboard size in world units (width, actual visual height / 2).
         # NOTE: render_billboard spans y..y+h/2 vertically, so the visible
-        # height is sprite_h * 0.5. We want a tall, imposing emu (~2.6 world
-        # units = taller than the player's eye height of 1.6).
-        self.sprite_w = 1.7
-        self.sprite_h = 5.2
+        # height is sprite_h * 0.5. We want a big, imposing emu (~3.1 world
+        # units = roughly twice the player's eye height of 1.6).
+        self.sprite_w = 2.0
+        self.sprite_h = 6.2
 
     def _get_sprites(self):
         if self._sprites is None:
