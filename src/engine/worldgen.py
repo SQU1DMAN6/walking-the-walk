@@ -1,14 +1,11 @@
-"""Procedural world generation for the outback environment."""
 import math
 import random
 
 from engine.mesh import Mesh
 
 
-# Noise helpers
-
 def _hash(x, y, seed):
-    """Simple deterministic hash for noise."""
+
     h = seed
     h = (h * 374761393 + x * 668265263) & 0xFFFFFFFF
     h = (h * 374761393 + y * 668265263) & 0xFFFFFFFF
@@ -18,7 +15,7 @@ def _hash(x, y, seed):
 
 
 def _smooth_noise(x, y, seed):
-    """Bilinear interpolation of a simple value noise."""
+
     ix = int(math.floor(x))
     iy = int(math.floor(y))
     fx = x - ix
@@ -37,7 +34,7 @@ def _smooth_noise(x, y, seed):
 
 
 def _fbm(x, y, seed, octaves=4):
-    """Fractional Brownian motion for terrain height."""
+
     value = 0.0
     amplitude = 1.0
     frequency = 1.0
@@ -51,15 +48,13 @@ def _fbm(x, y, seed, octaves=4):
 
 
 def get_terrain_height(x, z, seed, height_scale=1.5):
-    """Sample terrain height at a given world (x, z) position."""
+
     h = _fbm(x * 0.04, z * 0.04, seed, octaves=4)
     h2 = _smooth_noise(x * 0.01, z * 0.01, seed + 1) * 0.5
     h = h * 0.7 + h2 * 0.3
     h = h * h * 1.5
-    return h * height_scale - 2.0  # offset so player stands on it
+    return h * height_scale - 2.0
 
-
-# Terrain
 
 def generate_terrain(
     width,
@@ -69,12 +64,12 @@ def generate_terrain(
     height_scale=1.5,
     colour=(180, 120, 60)
 ):
-    """Generate a height-mapped terrain mesh with an offset so the
-    player stands ON (not in) the terrain."""
+
+
     hw = width / 2
     hd = depth / 2
 
-    # Generate heightmap
+
     heights = []
     for iz in range(segments + 1):
         row = []
@@ -106,135 +101,44 @@ def generate_terrain(
     return Mesh(vertices, faces, colour, (0, 0, 0))
 
 
-# Trees (Eucalyptus-style)
-
 def _create_foliage_cluster(position, rx, ry, rz, colour):
-    """Create a single foliage cluster as a low-poly blob (14 triangles).
 
-    Uses an octahedron with randomised axis lengths so each cluster
-    has a slightly different shape. Adds extra detail faces for
-    a more organic look.
-    """
+
     verts = [
-        (0.0, ry, 0.0),         # 0: top
-        (rx * 0.7, ry * 0.3, rx * 0.7),  # 1: upper quadrant
-        (-rx * 0.7, ry * 0.3, rx * 0.7), # 2
-        (-rx * 0.7, ry * 0.3, -rx * 0.7),# 3
-        (rx * 0.7, ry * 0.3, -rx * 0.7), # 4
-        (rx, 0.0, 0.0),         # 5: mid ring
-        (0.0, 0.0, rz),         # 6
-        (-rx, 0.0, 0.0),        # 7
-        (0.0, 0.0, -rz),        # 8
-        (rx * 0.5, -ry * 0.3, rx * 0.5), # 9: lower ring
-        (-rx * 0.5, -ry * 0.3, rx * 0.5),# 10
-        (-rx * 0.5, -ry * 0.3, -rx * 0.5),# 11
-        (rx * 0.5, -ry * 0.3, -rx * 0.5),# 12
-        (0.0, -ry * 0.4, 0.0),  # 13: bottom
+        (0.0, ry, 0.0),
+        (rx * 0.7, ry * 0.3, rx * 0.7),
+        (-rx * 0.7, ry * 0.3, rx * 0.7),
+        (-rx * 0.7, ry * 0.3, -rx * 0.7),
+        (rx * 0.7, ry * 0.3, -rx * 0.7),
+        (rx, 0.0, 0.0),
+        (0.0, 0.0, rz),
+        (-rx, 0.0, 0.0),
+        (0.0, 0.0, -rz),
+        (rx * 0.5, -ry * 0.3, rx * 0.5),
+        (-rx * 0.5, -ry * 0.3, rx * 0.5),
+        (-rx * 0.5, -ry * 0.3, -rx * 0.5),
+        (rx * 0.5, -ry * 0.3, -rx * 0.5),
+        (0.0, -ry * 0.4, 0.0),
     ]
 
     faces = [
-        # Apex to upper ring (4 triangles)
+
         (0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1),
-        # Upper ring to mid ring (8 triangles = 4 quads)
+
         (1, 5, 6), (1, 6, 2),
         (2, 6, 7), (2, 7, 3),
         (3, 7, 8), (3, 8, 4),
         (4, 8, 5), (4, 5, 1),
-        # Mid ring to lower ring (8 triangles = 4 quads)
+
         (5, 9, 10), (5, 10, 6),
         (6, 10, 11), (6, 11, 7),
         (7, 11, 12), (7, 12, 8),
         (8, 12, 9), (8, 9, 5),
-        # Lower ring to bottom (4 triangles)
+
         (9, 13, 10), (10, 13, 11), (11, 13, 12), (12, 13, 9),
     ]
 
     return Mesh(verts, faces, colour, position)
-
-
-def create_spear(start, end, colour):
-    """Create a stone-tipped spear mesh.
-
-    Parameters
-    ----------
-    start : (float, float, float)
-        Butt end of the spear shaft.
-    end : (float, float, float)
-        Tip end of the spear shaft (before the stone head).
-    colour : (int, int, int)
-        RGB tuple for the wooden shaft. The stone head is grey.
-
-    Returns
-    -------
-    Mesh
-        A Mesh with position=(0, 0, 0) that can be placed via renderer.
-    """
-    dx = end[0] - start[0]
-    dy = end[1] - start[1]
-    dz = end[2] - start[2]
-    length = math.sqrt(dx*dx + dy*dy + dz*dz)
-    if length < 1e-6:
-        return Mesh([], [], colour, (0, 0, 0))
-
-    # Shaft radius
-    shaft_radius = 0.04
-    shaft_len = length
-
-    # Build shaft as a cylinder along the +Z axis in local space, then
-    # we'll place the mesh so that its origin is at `start` and it
-    # extends toward `end`.  Simpler: build it along +X from 0..shaft_len.
-    r = shaft_radius
-    L = shaft_len
-    verts = [
-        (0, -r, -r),
-        (0,  r, -r),
-        (0,  r,  r),
-        (0, -r,  r),
-        (L, -r, -r),
-        (L,  r, -r),
-        (L,  r,  r),
-        (L, -r,  r),
-    ]
-    faces = [
-        (0, 1, 2), (0, 2, 3),  # back end cap
-        (4, 6, 5), (4, 7, 6),  # front end cap
-        (0, 4, 5), (0, 5, 1),  # top
-        (1, 5, 6), (1, 6, 2),  # right
-        (2, 6, 7), (2, 7, 3),  # bottom
-        (3, 7, 4), (3, 4, 0),  # left
-    ]
-
-    shaft_mesh = Mesh(verts, faces, colour, (0, 0, 0))
-
-    # Stone head: a small icosahedron-ish cluster at the tip (end of shaft)
-    head_size = 0.12
-    head_verts = []
-    head_faces = []
-    # Simple octahedron stone head centred at (L, 0, 0)
-    hx, hy, hz = L, 0.0, 0.0
-    hr = head_size
-    head_verts = [
-        (hx + hr, hy, hz),
-        (hx - hr, hy, hz),
-        (hx, hy + hr, hz),
-        (hx, hy - hr, hz),
-        (hx, hy, hz + hr),
-        (hx, hy, hz - hr),
-    ]
-    head_faces = [
-        (0, 2, 4), (0, 4, 3), (0, 3, 5), (0, 5, 2),
-        (1, 4, 2), (1, 3, 4), (1, 5, 3), (1, 2, 5),
-    ]
-    head_mesh = Mesh(head_verts, head_faces, (160, 160, 150), (0, 0, 0))
-
-    # We need a single mesh that includes both shaft and head.
-    # Easiest: translate head verts into shaft verts list and append faces
-    # with offset.
-    offset = len(verts)
-    verts.extend(head_mesh.vertices)
-    faces.extend(tuple(v + offset for v in f) for f in head_mesh.faces)
-
-    return Mesh(verts, faces, colour, (0, 0, 0))
 
 
 def create_branch(start, end, width, colour):
@@ -245,17 +149,16 @@ def create_branch(start, end, width, colour):
     if length < 0.001:
         return None
 
-    # Direction of the branch (normalised)
+
     nx, ny, nz = dx / length, dy / length, dz / length
 
-    # Compute two perpendicular vectors for the triangular cross-section
-    # First perpendicular: cross with world up (or X if vertical)
+
     if abs(ny) > 0.9:
         px, py, pz = 1.0, 0.0, 0.0
     else:
         px, py, pz = 0.0, 1.0, 0.0
 
-    # perp1 = dir × up
+
     wx = ny * pz - nz * py
     wy = nz * px - nx * pz
     wz = nx * py - ny * px
@@ -266,37 +169,37 @@ def create_branch(start, end, width, colour):
     wy /= wlen
     wz /= wlen
 
-    # perp2 = dir × perp1  (creates a triangle cross-section)
+
     vx = ny * wz - nz * wy
     vy = nz * wx - nx * wz
     vz = nx * wy - ny * wx
 
     hw = width * 0.5
-    # Three vertices at start, three at end (triangular prism)
-    # Triangle points: one top, two bottom
+
+
     verts = [
-        (start[0] + wx * hw, start[1] + wy * hw, start[2] + wz * hw),       # 0: start top
-        (start[0] + vx * hw * 0.866 - wx * hw * 0.5,                          # 1: start bottom-left
+        (start[0] + wx * hw, start[1] + wy * hw, start[2] + wz * hw),
+        (start[0] + vx * hw * 0.866 - wx * hw * 0.5,
          start[1] + vy * hw * 0.866 - wy * hw * 0.5,
          start[2] + vz * hw * 0.866 - wz * hw * 0.5),
-        (start[0] - vx * hw * 0.866 - wx * hw * 0.5,                          # 2: start bottom-right
+        (start[0] - vx * hw * 0.866 - wx * hw * 0.5,
          start[1] - vy * hw * 0.866 - wy * hw * 0.5,
          start[2] - vz * hw * 0.866 - wz * hw * 0.5),
-        (end[0] + wx * hw, end[1] + wy * hw, end[2] + wz * hw),               # 3: end top
-        (end[0] + vx * hw * 0.866 - wx * hw * 0.5,                            # 4: end bottom-left
+        (end[0] + wx * hw, end[1] + wy * hw, end[2] + wz * hw),
+        (end[0] + vx * hw * 0.866 - wx * hw * 0.5,
          end[1] + vy * hw * 0.866 - wy * hw * 0.5,
          end[2] + vz * hw * 0.866 - wz * hw * 0.5),
-        (end[0] - vx * hw * 0.866 - wx * hw * 0.5,                            # 5: end bottom-right
+        (end[0] - vx * hw * 0.866 - wx * hw * 0.5,
          end[1] - vy * hw * 0.866 - wy * hw * 0.5,
          end[2] - vz * hw * 0.866 - wz * hw * 0.5),
     ]
 
-    # 6 triangles: 3 side faces + 2 end caps (not rendered) + tube quads split
+
     faces = [
-        # Side faces (3 quads = 6 triangles)
-        (0, 3, 4), (0, 4, 1),  # top side
-        (0, 2, 5), (0, 5, 3),  # bottom side 1
-        (1, 4, 5), (1, 5, 2),  # bottom side 2
+
+        (0, 3, 4), (0, 4, 1),
+        (0, 2, 5), (0, 5, 3),
+        (1, 4, 5), (1, 5, 2),
     ]
 
     return Mesh(verts, faces, colour, position=(0, 0, 0))
@@ -305,22 +208,21 @@ def create_branch(start, end, width, colour):
 def create_tree(position, seed, base_height=4.0):
     rng = random.Random(seed)
 
-    # Tree dimensions
-    # Larger size variation: some trees massive, some small
+
     h_var = rng.uniform(1, 3.5)
     height = base_height * h_var
-    trunk_h = height * rng.uniform(0.25, 0.40)  # 25-40% of total
-    trunk_base_r = rng.uniform(0.15, 0.40)       # thicker trunk
+    trunk_h = height * rng.uniform(0.25, 0.40)
+    trunk_base_r = rng.uniform(0.15, 0.40)
     trunk_top_r = trunk_base_r * rng.uniform(0.4, 0.7)
 
-    # Slight lean for the trunk
+
     lean_angle = rng.uniform(-0.08, 0.08)
     lean_x = math.sin(lean_angle) * trunk_h
     lean_z = math.cos(lean_angle) * trunk_h - trunk_h
 
     trunk_colour = (110, 85, 55)
     branch_colour = (120, 90, 60)
-    # Olive/grey-green eucalyptus foliage
+
     canopy_base = (
         rng.uniform(60, 100),
         rng.uniform(100, 150),
@@ -329,69 +231,69 @@ def create_tree(position, seed, base_height=4.0):
 
     meshes = []
 
-    # Trunk: 4-sided prism, tapered
+
     tb = trunk_base_r
     tt = trunk_top_r
     lx = lean_x
     lz = lean_z
 
     trunk_verts = [
-        (-tb, 0.0, -tb),   # 0
-        ( tb, 0.0, -tb),   # 1
-        ( tb, 0.0,  tb),   # 2
-        (-tb, 0.0,  tb),   # 3
-        (-tt + lx, trunk_h * 0.5, -tt + lz),  # 4: mid ring
-        ( tt + lx, trunk_h * 0.5, -tt + lz),  # 5
-        ( tt + lx, trunk_h * 0.5,  tt + lz),  # 6
-        (-tt + lx, trunk_h * 0.5,  tt + lz),  # 7
-        (-tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),  # 8: top ring
-        ( tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),  # 9
-        ( tt * 0.7 + lx, trunk_h,  tt * 0.7 + lz),  # 10
-        (-tt * 0.7 + lx, trunk_h,  tt * 0.7 + lz),  # 11
+        (-tb, 0.0, -tb),
+        ( tb, 0.0, -tb),
+        ( tb, 0.0,  tb),
+        (-tb, 0.0,  tb),
+        (-tt + lx, trunk_h * 0.5, -tt + lz),
+        ( tt + lx, trunk_h * 0.5, -tt + lz),
+        ( tt + lx, trunk_h * 0.5,  tt + lz),
+        (-tt + lx, trunk_h * 0.5,  tt + lz),
+        (-tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),
+        ( tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),
+        ( tt * 0.7 + lx, trunk_h,  tt * 0.7 + lz),
+        (-tt * 0.7 + lx, trunk_h,  tt * 0.7 + lz),
     ]
     trunk_faces = [
-        # Bottom segment
+
         (0, 1, 2), (0, 2, 3),
         (0, 4, 5), (0, 5, 1),
         (1, 5, 6), (1, 6, 2),
         (2, 6, 7), (2, 7, 3),
         (3, 7, 4), (3, 4, 0),
-        # Top segment
+
         (4, 5, 6), (4, 6, 7),
         (4, 8, 9), (4, 9, 5),
         (5, 9, 10), (5, 10, 6),
         (6, 10, 11), (6, 11, 7),
         (7, 11, 8), (7, 8, 4),
-        # Cap the top
+
         (8, 9, 10), (8, 10, 11),
     ]
 
     trunk_mesh = Mesh(trunk_verts, trunk_faces, trunk_colour, position)
     meshes.append(trunk_mesh)
 
-    # Branches
+
     num_branches = rng.randint(3, 8)
     branch_tips = []
 
     for i in range(num_branches):
-        # Branch height on trunk (spread from low-mid to top)
+
         bh = trunk_h * rng.uniform(0.3, 0.95)
 
-        # Random horizontal direction
+
         yaw = rng.uniform(0, 2.0 * math.pi)
-        # Upward angle (15-65 degrees from horizontal)
+
         pitch = rng.uniform(0.25, 1.15)
 
-        # Branch length relative to crown size
+
         crown_r = rng.uniform(0.8, 3.0)
         branch_len = crown_r * rng.uniform(0.3, 0.6)
 
-        # Calculate end position
+
         end_x = position[0] + math.cos(yaw) * math.cos(pitch) * branch_len
         end_y = position[1] + bh + math.sin(pitch) * branch_len
         end_z = position[2] + math.sin(yaw) * math.cos(pitch) * branch_len
 
-        # Start position (on trunk surface)
+
         t = bh / trunk_h
         r_at_h = trunk_base_r + (trunk_top_r - trunk_base_r) * t
         start_x = position[0] + math.cos(yaw) * r_at_h * 0.8 + lx * t
@@ -401,15 +303,15 @@ def create_tree(position, seed, base_height=4.0):
         start = (start_x, start_y, start_z)
         end = (end_x, end_y, end_z)
 
-        branch_width = rng.uniform(0.06, 0.18)  # thicker branches
+        branch_width = rng.uniform(0.06, 0.18)
         branch_mesh = create_branch(start, end, branch_width, branch_colour)
         if branch_mesh:
             meshes.append(branch_mesh)
 
-        # Store tip for foliage
+
         branch_tips.append(end)
 
-        # Occasionally add a secondary branch fork (more often)
+
         if rng.random() < 0.4 and len(branch_tips) < 8:
             fork_yaw = yaw + rng.uniform(-0.6, 0.6)
             fork_pitch = pitch + rng.uniform(-0.3, 0.3)
@@ -425,13 +327,13 @@ def create_tree(position, seed, base_height=4.0):
                 meshes.append(fork_mesh)
             branch_tips.append(fork_end)
 
-    # Foliage clusters
+
     num_clusters = rng.randint(1, 2)
 
-    # Place clusters at branch tips, plus extras scattered in canopy volume
+
     cluster_positions = list(branch_tips)
 
-    # Add extra clusters
+
     crown_radius = rng.uniform(0.8, 3.0)
     for _ in range(num_clusters - len(cluster_positions)):
         ca = rng.uniform(0, 2.0 * math.pi)
@@ -443,10 +345,10 @@ def create_tree(position, seed, base_height=4.0):
         cluster_positions.append((cx, cy, cz))
 
     for cpos in cluster_positions:
-        # Larger clusters
+
         cluster_r = rng.uniform(0.3, 0.9)
         cluster_h = rng.uniform(0.3, 0.7)
-        # Slight colour variation per cluster
+
         c_colour = (
             int(canopy_base[0] + rng.uniform(-15, 15)),
             int(canopy_base[1] + rng.uniform(-20, 20)),
@@ -460,18 +362,13 @@ def create_tree(position, seed, base_height=4.0):
     return meshes
 
 
-# Bushes
-
 def create_bush(position, seed):
-    """Create a low-poly bush mesh — spinifex-style tussock.
 
-    Uses 3 crossed quads (6 triangles) for a rounded bush look.
-    Colours are yellow-green / tan for dry outback vegetation.
-    """
+
     rng = random.Random(seed)
     radius = rng.uniform(0.4, 1.0)
     height = rng.uniform(0.3, 0.8)
-    # Tan / yellow-green for dry spinifex
+
     colour = (
         int(rng.uniform(100, 160)),
         int(rng.uniform(130, 180)),
@@ -496,15 +393,13 @@ def create_bush(position, seed):
     return Mesh(verts, faces, colour, position)
 
 
-# Rocks
-
 def create_rock(position, seed):
-    """Create a low-poly rock mesh — red/orange for outback."""
+
     rng = random.Random(seed)
     w = rng.uniform(0.3, 1.0)
     h = rng.uniform(0.2, 0.6)
     d = rng.uniform(0.3, 0.8)
-    # Reddish-grey for outback rocks
+
     r_col = int(rng.uniform(100, 180))
     g_col = int(rng.uniform(60, 120))
     b_col = int(rng.uniform(40, 80))
@@ -531,14 +426,12 @@ def create_rock(position, seed):
     return Mesh(verts, faces, colour, position)
 
 
-# Spinifex grass
-
 def create_spinifex(position, seed):
-    """Small tufts of dry grass — 2 crossed quads (4 triangles)."""
+
     rng = random.Random(seed)
     radius = rng.uniform(0.15, 0.4)
     height = rng.uniform(0.15, 0.4)
-    # Yellow-tan for dry grass
+
     colour = (
         int(rng.uniform(140, 200)),
         int(rng.uniform(140, 190)),
@@ -558,486 +451,3 @@ def create_spinifex(position, seed):
     ]
 
     return Mesh(verts, faces, colour, position)
-
-
-# Discovery markers (exploration landmarks)
-
-def create_discovery(position, colour=(200, 180, 80)):
-    """A small glowing marker placed at a point of interest. The player
-    can stand near one and press E to collect it (ties into the journal)."""
-    r = 0.35
-    h = 0.9
-    verts = [
-        (0.0, h, 0.0),      # 0 top
-        (r, 0.0, 0.0),      # 1
-        (0.0, 0.0, r),      # 2
-        (-r, 0.0, 0.0),     # 3
-        (0.0, 0.0, -r),     # 4
-        (0.0, 0.05, 0.0),   # 5 base
-    ]
-    faces = [
-        (0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1),
-        (1, 5, 2), (2, 5, 3), (3, 5, 4), (4, 5, 1),
-    ]
-    return Mesh(verts, faces, colour, position)
-
-
-
-RESOURCE_COLOURS = {
-    "wood": (150, 105, 60),
-    "stone": (160, 160, 165),
-    "fibre": (190, 200, 90),
-    "bark": (140, 70, 50),
-    "bush_tomato": (210, 70, 70),
-    "spinifex": (180, 200, 90),
-}
-
-
-def _cube(center, r, colour):
-    """A small solid cube mesh centred at `center` with half-size r."""
-    cx, cy, cz = center
-    verts = [
-        (-r, -r, -r), ( r, -r, -r), ( r, r, -r), (-r, r, -r),
-        (-r, -r,  r), ( r, -r,  r), ( r, r,  r), (-r, r,  r),
-    ]
-    faces = [
-        (0,1,2), (0,2,3), (4,6,5), (4,7,6),
-        (0,4,5), (0,5,1), (1,5,6), (1,6,2),
-        (2,6,7), (2,7,3), (3,7,4), (3,4,0),
-    ]
-    return Mesh(verts, faces, colour, (cx, cy, cz))
-
-
-def create_resource(position, item_id):
-    """A small floating marker for a collectible resource node."""
-    col = RESOURCE_COLOURS.get(item_id, (200, 200, 200))
-    return _cube(position, 0.18, col)
-
-
-def create_camp(position):
-    """Meshes for the player camp: a larger, more noticeable camp with fire pit, tent, and tables."""
-    mx, my, mz = position
-    meshes = []
-
-    # Larger fire ring with more stones
-    for dx in (-0.8, -0.3, 0.3, 0.8):
-        for dz in (-0.8, -0.3, 0.3, 0.8):
-            meshes.append(_cube((mx + dx, my + 0.1, mz + dz), 0.2, (100, 95, 90)))
-
-    # Central fire pit (glowing orange)
-    meshes.append(_cube((mx, my + 0.2, mz), 0.3, (240, 140, 40)))
-
-    # Larger tent structure
-    tent_col = (140, 100, 75)
-    tent_verts = [
-        (-2.0, 0.0, -1.5), ( 2.0, 0.0, -1.5), (0.0, 2.0, -0.5),
-        (-2.0, 0.0,  2.5), ( 2.0, 0.0,  2.5), (0.0, 2.0,  1.0),
-        (-2.0, 0.0,  0.0), ( 2.0, 0.0,  0.0), (-2.0, 0.0, -1.5),
-    ]
-    tent_faces = [
-        (0, 2, 1), (3, 4, 5), (0, 1, 4), (0, 4, 3),
-        (1, 2, 5), (1, 5, 4), (2, 0, 3), (2, 3, 5),
-    ]
-    meshes.append(Mesh(tent_verts, tent_faces, tent_col, (mx + 3.0, my, mz - 1.0)))
-
-    # Camp tables (larger, more visible)
-    table_col = (160, 120, 80)
-    for dx, dz in [(-2.5, -1.5), (-2.5, 1.5), (2.5, -1.5)]:
-        meshes.append(_cube((mx + dx, my + 0.4, mz + dz), 0.5, table_col))
-        # Table legs
-        for ldx, ldz in [(-0.3, -0.3), (0.3, -0.3), (-0.3, 0.3), (0.3, 0.3)]:
-            meshes.append(_cube((mx + dx + ldx, my + 0.2, mz + dz + ldz), 0.08, (120, 90, 60)))
-
-    return meshes
-
-
-# Chunk terrain (world-space height sampling so seams match)
-
-def _terrain_vertex_colour(wx, wz, seed, base):
-    """Compute a per-vertex terrain colour from a low-frequency world-space
-    noise field. This makes colour vary organically and continuously across
-    chunk borders (no square seams)."""
-    # Low-frequency colour noise (0..1)
-    n = _smooth_noise(wx * 0.02, wz * 0.02, seed + 777)
-    n2 = _smooth_noise(wx * 0.05 + 100, wz * 0.05 + 100, seed + 888)
-    # Blend two octaves for organic variation
-    t = n * 0.6 + n2 * 0.4
-    # Narrow variation so chunks feel interconnected
-    r = base[0] + (t - 0.5) * 18
-    g = base[1] + (t - 0.5) * 14
-    b = base[2] + (t - 0.5) * 10
-    return (int(r), int(g), int(b))
-
-
-def _generate_chunk_terrain(cx, cz, chunk_size, segments, seed, colour):
-    """Build a terrain mesh for a chunk, sampling the noise at WORLD
-    coordinates so adjacent chunks share identical edge heights and
-    per-vertex colours blend smoothly across chunk borders."""
-    x0 = cx * chunk_size
-    z0 = cz * chunk_size
-
-    vertices = []
-    vertex_colours = []
-    for iz in range(segments + 1):
-        for ix in range(segments + 1):
-            wx = x0 + (chunk_size * ix / segments)
-            wz = z0 + (chunk_size * iz / segments)
-            y = get_terrain_height(wx, wz, seed, 1.5)
-            vertices.append((wx, y, wz))
-            vertex_colours.append(_terrain_vertex_colour(wx, wz, seed, colour))
-
-    faces = []
-    for iz in range(segments):
-        for ix in range(segments):
-            i0 = iz * (segments + 1) + ix
-            i1 = iz * (segments + 1) + ix + 1
-            i2 = (iz + 1) * (segments + 1) + ix
-            i3 = (iz + 1) * (segments + 1) + ix + 1
-            faces.append((i0, i1, i2))
-            faces.append((i2, i1, i3))
-
-    return Mesh(vertices, faces, colour, (0, 0, 0), vertex_colours=vertex_colours)
-
-
-# Chunk generation
-
-def generate_chunk(cx, cz, seed, chunk_size=40, segments=12):
-    """Generate a single deterministic terrain tile (chunk).
-
-    Args:
-        cx, cz: chunk grid coordinates (integers).
-        seed: global world seed.
-        chunk_size: world-space size of one chunk edge.
-        segments: terrain grid resolution per chunk.
-
-    Returns a dict with:
-        meshes     - list of Mesh objects for this chunk
-        obstacles  - list of (cx, cz, radius, height) collision circles
-        discoveries - list of dicts describing collectible landmarks
-    """
-    rng = random.Random(seed * 7919 + cx * 104729 + cz * 1299709)
-    result = {"meshes": [], "obstacles": [], "discoveries": [], "resources": []}
-    meshes = result["meshes"]
-    obstacles = result["obstacles"]
-    discoveries = result["discoveries"]
-    resources = result["resources"]
-
-    # World-space bounds of this chunk
-    x0 = cx * chunk_size
-    z0 = cz * chunk_size
-    x1 = x0 + chunk_size
-    z1 = z0 + chunk_size
-
-    r_base = rng.randint(215, 240)
-    g_base = rng.randint(160, 195)
-    b_base = rng.randint(85, 120)
-    terrain_colour = (r_base, g_base, b_base)
-
-    # Terrain mesh covering the chunk tile (world-space heights)
-    terrain = _generate_chunk_terrain(
-        cx, cz, chunk_size, segments, seed, terrain_colour,
-    )
-    meshes.append(terrain)
-
-    # Trees
-    tree_positions = []
-    num_trees = rng.randint(4, 8)
-    for i in range(num_trees):
-        tx = rng.uniform(x0 + 2, x1 - 2)
-        tz = rng.uniform(z0 + 2, z1 - 2)
-        ty = get_terrain_height(tx, tz, seed, 1.5)
-        if ty < -1.5:
-            continue
-        too_close = False
-        for ex, ez in tree_positions:
-            if (tx - ex) ** 2 + (tz - ez) ** 2 < 16.0:
-                too_close = True
-                break
-        if too_close:
-            continue
-        tree_positions.append((tx, tz))
-        tree_meshes = create_tree((tx, ty, tz), seed + i * 7 + cx * 31 + cz * 17)
-        meshes.extend(tree_meshes)
-        obstacles.append((tx, tz, 0.7, 4.0))
-
-    # Bushes
-    num_bushes = rng.randint(12, 24)
-    for i in range(num_bushes):
-        bx = rng.uniform(x0 + 1, x1 - 1)
-        bz = rng.uniform(z0 + 1, z1 - 1)
-        by = get_terrain_height(bx, bz, seed, 1.5)
-        too_close = False
-        for tx, tz in tree_positions:
-            if (bx - tx) ** 2 + (bz - tz) ** 2 < 4.0:
-                too_close = True
-                break
-        if too_close:
-            continue
-        meshes.append(create_bush((bx, by, bz), seed + i * 13 + 1000 + cx * 7 + cz * 11))
-
-    # Rocks
-    rock_positions = []
-    num_rocks = rng.randint(3, 6)
-    for i in range(num_rocks):
-        rx = rng.uniform(x0 + 1, x1 - 1)
-        rz = rng.uniform(z0 + 1, z1 - 1)
-        ry = get_terrain_height(rx, rz, seed, 1.5)
-        rock_positions.append((rx, rz))
-        meshes.append(create_rock((rx, ry, rz), seed + i * 19 + 2000 + cx * 13 + cz * 29))
-        obstacles.append((rx, rz, 0.5, 1.2))
-
-    # Spinifex grass
-    spinifex_positions = []
-    num_spinifex = rng.randint(8, 16)
-    for i in range(num_spinifex):
-        sx = rng.uniform(x0 + 1, x1 - 1)
-        sz = rng.uniform(z0 + 1, z1 - 1)
-        sy = get_terrain_height(sx, sz, seed, 1.5)
-        too_close = False
-        for tx, tz in tree_positions:
-            if (sx - tx) ** 2 + (sz - tz) ** 2 < 4.0:
-                too_close = True
-                break
-        if too_close:
-            continue
-        spinifex_positions.append((sx, sz))
-        meshes.append(create_spinifex((sx, sy, sz), seed + i * 31 + 3000 + cx * 19 + cz * 23))
-
-    # Collectible resources near their source (wood/bark by trees, stone by    # rocks, fibre by spinifex)
-    for tx, tz in tree_positions:
-        for _ in range(2):
-            if rng.random() < 0.5:
-                rx = tx + rng.uniform(-1.3, 1.3)
-                rz = tz + rng.uniform(-1.3, 1.3)
-                ry = get_terrain_height(rx, rz, seed, 1.5)
-                item = "bark" if rng.random() < 0.3 else "wood"
-                pos = (rx, ry + 0.2, rz)
-                resources.append({"x": rx, "y": ry + 0.2, "z": rz, "item_id": item, "qty": 1, "required_tool": "axe"})
-        if rng.random() < 0.5:
-            rx = tx + rng.uniform(-1.4, 1.4)
-            rz = tz + rng.uniform(-1.4, 1.4)
-            ry = get_terrain_height(rx, rz, seed, 1.5)
-            resources.append({"x": rx, "y": ry + 0.2, "z": rz, "item_id": "wood", "qty": 1, "required_tool": "axe"})
-    for rx, rz in rock_positions:
-        if rng.random() < 0.7:
-            sx = rx + rng.uniform(-0.7, 0.7)
-            sz = rz + rng.uniform(-0.7, 0.7)
-            sy = get_terrain_height(sx, sz, seed, 1.5)
-            resources.append({"x": sx, "y": sy + 0.2, "z": sz, "item_id": "stone", "qty": 1, "required_tool": "pickaxe"})
-    for sx, sz in spinifex_positions:
-        if rng.random() < 0.5:
-            fx = sx + rng.uniform(-0.6, 0.6)
-            fz = sz + rng.uniform(-0.6, 0.6)
-            fy = get_terrain_height(fx, fz, seed, 1.5)
-            item = "bush_tomato" if rng.random() < 0.08 else "fibre"
-            resources.append({"x": fx, "y": fy + 0.2, "z": fz, "item_id": item, "qty": 1, "required_tool": None})
-
-    # Discovery landmarks (sparse, deterministic)
-    # Only some chunks contain a discovery, so they feel special.
-    # The origin chunk always has one so the game is playable immediately.
-    if (cx == 0 and cz == 0) or rng.random() < 0.35:
-        dx = rng.uniform(x0 + 4, x1 - 4)
-        dz = rng.uniform(z0 + 4, z1 - 4)
-        dy = get_terrain_height(dx, dz, seed, 1.5)
-        name = rng.choice([
-            "Uluru Rock",
-            "River Red Gum",
-            "Spinifex Grass",
-            "Coolabah Tree",
-            "Desert Oak",
-        ])
-        category = "Landmark" if name == "Uluru Rock" else "Flora"
-        description = {
-            "Uluru Rock": "A weathered sandstone monolith sacred to the "
-                          "Anangu people of Central Australia.",
-            "River Red Gum": "A massive eucalyptus that grows beside "
-                             "watercourses across the outback.",
-            "Spinifex Grass": "A hardy, drought-resistant grass that covers "
-                              "vast areas of inland Australia.",
-            "Coolabah Tree": "A tree of the arid interior, often found "
-                             "growing in claypans and near waterholes.",
-            "Desert Oak": "A slow-growing tree with needle-like foliage, "
-                          "common to the spinifex country of the outback.",
-        }[name]
-        colour = rng.choice([
-            (210, 190, 80), (170, 220, 90), (200, 200, 60),
-            (120, 180, 120), (160, 200, 110),
-        ])
-        meshes.append(create_discovery((dx, dy, dz), colour=colour))
-        discoveries.append({
-            "x": dx,
-            "z": dz,
-            "y": dy,
-            "name": name,
-            "category": category,
-            "description": description,
-        })
-
-    return result
-
-
-# World generation
-
-def generate_world(seed=42, terrain_size=100, terrain_segments=30):
-    """Generate a complete outback world scene.
-
-    Returns a dict with:
-        meshes     - list of Mesh objects to render
-        obstacles  - list of (cx, cz, radius, height) collision circles
-                    (tree trunks and rocks the player cannot walk through)
-        discoveries - list of dicts describing collectible landmarks
-                    {x, z, y, name, category, description}
-    """
-    rng = random.Random(seed)
-    result = {"meshes": [], "obstacles": [], "discoveries": []}
-    meshes = result["meshes"]
-    obstacles = result["obstacles"]
-    discoveries = result["discoveries"]
-
-    # Terrain colours: bright red/orange Australian outback palette
-    r_base = rng.randint(215, 245)
-    g_base = rng.randint(165, 200)
-    b_base = rng.randint(85, 120)
-    terrain_colour = (r_base, g_base, b_base)
-
-    terrain = generate_terrain(
-        terrain_size, terrain_size, terrain_segments,
-        seed, height_scale=1.5,
-        colour=terrain_colour,
-    )
-
-    meshes.append(terrain)
-
-    # Spawn trees
-    tree_positions = []
-    for i in range(60):
-        tx = rng.uniform(-terrain_size/2 + 3, terrain_size/2 - 3)
-        tz = rng.uniform(-terrain_size/2 + 3, terrain_size/2 - 3)
-        ty = get_terrain_height(tx, tz, seed, 1.5)
-
-        # Don't place trees in very low areas (creek beds)
-        if ty < -1.5:
-            continue
-
-        # Avoid placing trees too close to each other
-        too_close = False
-        for ex, ez in tree_positions:
-            if (tx - ex) ** 2 + (tz - ez) ** 2 < 16.0:
-                too_close = True
-                break
-        if too_close:
-            continue
-
-        tree_positions.append((tx, tz))
-        tree_meshes = create_tree((tx, ty, tz), seed + i * 7)
-        meshes.extend(tree_meshes)
-
-        # Trunk collision circle for the tree
-        obstacles.append((tx, tz, 0.7, 4.0))
-
-    # Spawn bushes
-    for i in range(240):
-        bx = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
-        bz = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
-        by = get_terrain_height(bx, bz, seed, 1.5)
-
-        # Avoid placing bushes on trees
-        too_close = False
-        for tx, tz in tree_positions:
-            if (bx - tx) ** 2 + (bz - tz) ** 2 < 4.0:
-                too_close = True
-                break
-        if too_close:
-            continue
-
-        meshes.append(create_bush((bx, by, bz), seed + i * 13 + 1000))
-
-    # Spawn rocks
-    for i in range(60):
-        rx = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
-        rz = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
-        ry = get_terrain_height(rx, rz, seed, 1.5)
-
-        meshes.append(create_rock((rx, ry, rz), seed + i * 19 + 2000))
-        obstacles.append((rx, rz, 0.5, 1.2))
-
-    # Spawn spinifex grass tufts
-    for i in range(120):
-        sx = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
-        sz = rng.uniform(-terrain_size/2 + 1, terrain_size/2 - 1)
-        sy = get_terrain_height(sx, sz, seed, 1.5)
-
-        # Avoid placing on trees
-        too_close = False
-        for tx, tz in tree_positions:
-            if (sx - tx) ** 2 + (sz - tz) ** 2 < 4.0:
-                too_close = True
-                break
-        if too_close:
-            continue
-
-        meshes.append(create_spinifex((sx, sy, sz), seed + i * 31 + 3000))
-
-    # Discovery landmarks (exploration objective)
-    discovery_defs = [
-        {
-            "name": "Uluru Rock",
-            "category": "Landmark",
-            "description": "A weathered sandstone monolith sacred to the "
-                           "Anangu people of Central Australia.",
-        },
-        {
-            "name": "River Red Gum",
-            "category": "Flora",
-            "description": "A massive eucalyptus that grows beside "
-                           "watercourses across the outback.",
-        },
-        {
-            "name": "Spinifex Grass",
-            "category": "Flora",
-            "description": "A hardy, drought-resistant grass that covers "
-                           "vast areas of inland Australia.",
-        },
-        {
-            "name": "Coolabah Tree",
-            "category": "Flora",
-            "description": "A tree of the arid interior, often found "
-                           "growing in claypans and near waterholes.",
-        },
-        {
-            "name": "Desert Oak",
-            "category": "Flora",
-            "description": "A slow-growing tree with needle-like foliage, "
-                           "common to the spinifex country of the outback.",
-        },
-    ]
-
-    discovery_colours = [
-        (210, 190, 80),
-        (170, 220, 90),
-        (200, 200, 60),
-        (120, 180, 120),
-        (160, 200, 110),
-    ]
-
-    for i, ddef in enumerate(discovery_defs):
-        # Place each discovery at a distinct, reachable spot
-        dx = rng.uniform(-terrain_size/2 + 6, terrain_size/2 - 6)
-        dz = rng.uniform(-terrain_size/2 + 6, terrain_size/2 - 6)
-        dy = get_terrain_height(dx, dz, seed, 1.5)
-        meshes.append(
-            create_discovery(
-                (dx, dy, dz),
-                colour=discovery_colours[i % len(discovery_colours)],
-            )
-        )
-        discoveries.append({
-            "x": dx,
-            "z": dz,
-            "y": dy,
-            "name": ddef["name"],
-            "category": ddef["category"],
-            "description": ddef["description"],
-        })
-
-    return result

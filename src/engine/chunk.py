@@ -1,138 +1,186 @@
-"""Procedural chunk streaming.
-
-The world is divided into fixed-size tiles (chunks). A ChunkManager keeps
-only the chunks within a render distance of the player loaded, baking each
-chunk's meshes into persistent GPU VBOs once on load and freeing them on
-unload. This keeps memory/CPU bounded while allowing an effectively
-infinite explorable world.
-"""
+from dataclasses import dataclass
 import math
+import random
 
-from engine.worldgen import generate_chunk
-from engine.opengl_renderer import build_batches
-
-
-class Chunk:
-    """A loaded chunk: its grid coords, meshes, obstacles, discoveries and
-    the GPU batches (VBOs) baked from its meshes."""
-
-    __slots__ = ('cx', 'cz', 'meshes', 'obstacles', 'discoveries', 'resources', 'batches')
-
-    def __init__(self, cx, cz, meshes, obstacles, discoveries, resources, batches):
-        self.cx = cx
-        self.cz = cz
-        self.meshes = meshes
-        self.obstacles = obstacles
-        self.discoveries = discoveries
-        self.resources = resources
-        self.batches = batches
+from engine.mesh import Mesh
+from engine.paths import PathNetwork, segment_distance
+from engine.worldgen import create_tree, create_bush, create_spinifex, get_terrain_height
+from engine.models import rock
 
 
-class ChunkManager:
-    """Streams chunks around a player position."""
+@dataclass(frozen=True)
+class Obstacle:
+    x: float
+    z: float
+    radius: float
+    kind: str
 
-    def __init__(self, seed, chunk_size=40, render_distance=2, segments=12):
+
+class TutorialChunk:
+    bounds = (-36.0, 36.0, -36.0, 36.0)
+    player_radius = .4
+
+    def __init__(self, seed=42):
         self.seed = seed
-        self.chunk_size = chunk_size
-        self.render_distance = render_distance
-        self.segments = segments
+        self.paths = PathNetwork(seed)
+        self.spawn = self.position(*self.paths.route[0])
+        self.beacon = self.position(*self.paths.route[-1])
 
-        # key: (cx, cz) -> Chunk
-        self.chunks = {}
+        self.resources = [(kind, self.position(*self.paths.at(distance)))
+                          for kind, distance in [('can', 9), ('bottle', 15),
+                                                 ('stick', 32), ('stick', 37), ('rock', 43)]]
+        self.encounter = self.position(*self.paths.at(64))
+        self.obstacles = []
+        self.meshes = [self._terrain()]
+        self.details = []
+        self._vegetation()
+        self.validation = self.validate()
 
-    # Helpers
+    def height(self, x, z):
+        return get_terrain_height(x, z, self.seed, height_scale=.8)
 
-    def chunk_at(self, x, z):
-        """Return the chunk grid coords containing world position (x, z)."""
-        cx = int(math.floor(x / self.chunk_size))
-        cz = int(math.floor(z / self.chunk_size))
-        return (cx, cz)
+    def position(self, x, z):
+        return (x, self.height(x, z), z)
 
-    def _load(self, cx, cz):
-        """Generate and bake a chunk, then cache it."""
-        data = generate_chunk(
-            cx, cz, self.seed,
-            chunk_size=self.chunk_size,
-            segments=self.segments,
-        )
-        batches = build_batches(data["meshes"])
-        chunk = Chunk(
-            cx, cz,
-            data["meshes"],
-            data["obstacles"],
-            data["discoveries"],
-            data["resources"],
-            batches,
-        )
-        self.chunks[(cx, cz)] = chunk
-        return chunk
+    def _terrain(self):
+        verts, colours, faces = [], [], []
+        segments, width = 80, 80
+        for iz in range(segments + 1):
+            for ix in range(segments + 1):
+                x, z = -40 + ix * width/segments, -40 + iz * width/segments
+                verts.append((x, self.height(x, z), z))
+                earth = self.paths.on_path(x, z)
+                variation = int(6 * math.sin(x*.7 + z*.4))
+                base = (116, 95, 62) if earth else (49, 79, 42)
+                colours.append(tuple(c + variation for c in base))
+        for iz in range(segments):
+            for ix in range(segments):
+                a = iz * (segments+1) + ix
+                faces.extend(((a, a+segments+1, a+1), (a+1, a+segments+1, a+segments+2)))
+        return Mesh(verts, faces, (70, 91, 47), (0, 0, 0), vertex_colours=colours)
 
-    def _unload(self, cx, cz):
-        """Free a chunk's GPU VBOs and drop it from the cache."""
-        chunk = self.chunks.pop((cx, cz), None)
-        if chunk is None:
-            return
-        import OpenGL.GL as gl
-        for batch in chunk.batches:
-            if batch.vbo:
-                gl.glDeleteBuffers(1, [batch.vbo])
+    @staticmethod
+    def _jungle(mesh, leaf=False):
 
-    # Public API
+        if leaf:
+            mesh.colour = (40, 104, 54)
+        else:
+            mesh.colour = tuple(round(c / 24) * 24 for c in mesh.colour)
+        return mesh
 
-    def update(self, player_x, player_z):
-        """Ensure all chunks within render distance are loaded, and unload
-        any that have fallen out of range. Returns the list of loaded
-        chunks (for rendering)."""
-        pcx, pcz = self.chunk_at(player_x, player_z)
-        rd = self.render_distance
+    def _vegetation(self):
+        rng = random.Random(self.seed)
+        sites = [(rng.uniform(-35, 35), rng.uniform(-35, 35)) for _ in range(630)]
 
-        # Determine the set of chunks that should be loaded
-        wanted = set()
-        for dx in range(-rd, rd + 1):
-            for dz in range(-rd, rd + 1):
-                wanted.add((pcx + dx, pcz + dz))
+        for edge in (-37.5, 37.5):
+            for n in range(40):
+                v = -39 + n * 2
+                sites.extend(((edge, v), (v, edge)))
+        for i, (x, z) in enumerate(sites):
+            if self.paths.distance(x, z) < self.paths.half_width + 2.8:
+                continue
+            if any(math.hypot(x-o.x, z-o.z) < 1.4 for o in self.obstacles):
+                continue
+            tree = create_tree(self.position(x, z), self.seed + i*7, base_height=4.5)
 
-        # Load missing chunks
-        for key in wanted:
-            if key not in self.chunks:
-                self._load(*key)
 
-        # Unload chunks no longer wanted
-        for key in list(self.chunks.keys()):
-            if key not in wanted:
-                self._unload(*key)
+            ground = self.height(x, z)
+            radius = .7
+            # Low branches count too; keep the route clear.
+            for mesh in tree:
+                if min(v[1]+mesh.position[1]-ground for v in mesh.vertices) <= 2.0:
+                    radius = max(radius, max(math.hypot(v[0]+mesh.position[0]-x,
+                                                       v[2]+mesh.position[2]-z) for v in mesh.vertices))
+            if self.paths.distance(x, z) < self.paths.half_width + radius:
+                continue
 
-        return list(self.chunks.values())
+            for mesh in tree:
+                self.meshes.append(self._jungle(mesh, mesh.colour[1] > mesh.colour[0]))
+            self.obstacles.append(Obstacle(x, z, radius, 'tree'))
+            self.details.append(('tree', x, z, False))
+        for i in range(1100):
+            x, z = rng.uniform(-38, 38), rng.uniform(-38, 38)
+            if self.paths.distance(x, z) < self.paths.half_width + 1.05:
+                continue
+            mesh = self._jungle(create_bush(self.position(x, z), self.seed + i*13), True)
+            self.meshes.append(mesh)
+            self.details.append(('bush', x, z, False))
+        for i in range(2200):
+            x, z = rng.uniform(-38, 38), rng.uniform(-38, 38)
+            on_path = self.paths.on_path(x, z)
+            if on_path and rng.random() > .06:
+                continue
+            grass = self._jungle(create_spinifex(self.position(x, z), self.seed+i*31), True)
+            self.meshes.append(grass)
+            self.details.append(('grass', x, z, on_path))
 
-    def all_batches(self):
-        """Flatten all loaded chunks' GPU batches into one list for drawing."""
-        batches = []
-        for chunk in self.chunks.values():
-            batches.extend(chunk.batches)
-        return batches
+        for i in range(250):
+            if i < 200:
+                x, z = self.paths.at(rng.uniform(0, self.paths.lengths[-1]))
+                x += rng.uniform(-1.9, 1.9)
+                z += rng.uniform(-1.9, 1.9)
+            else:
+                x, z = rng.uniform(-35, 35), rng.uniform(-35, 35)
+            mesh = rock(self.seed+i)[0]
+            mesh.vertices = [(vx*.45, vy*.16, vz*.45) for vx, vy, vz in mesh.vertices]
+            mesh.position = self.position(x, z)
+            self.meshes.append(mesh)
+            self.details.append(('stone', x, z, self.paths.on_path(x, z)))
 
-    def all_obstacles(self):
-        """Flatten all loaded chunks' collision circles."""
-        obstacles = []
-        for chunk in self.chunks.values():
-            obstacles.extend(chunk.obstacles)
-        return obstacles
+    def is_walkable(self, x, z, radius=.4):
+        minx, maxx, minz, maxz = self.bounds
+        return (minx+radius <= x <= maxx-radius and minz+radius <= z <= maxz-radius
+                and all(math.hypot(x-o.x, z-o.z) >= radius+o.radius for o in self.obstacles))
 
-    def all_discoveries(self):
-        """Flatten all loaded chunks' discovery landmarks."""
-        discoveries = []
-        for chunk in self.chunks.values():
-            discoveries.extend(chunk.discoveries)
-        return discoveries
+    def move(self, x, z, dx, dz, radius=.4):
 
-    def all_resources(self):
-        """Flatten all loaded chunks' collectible resource nodes."""
-        resources = []
-        for chunk in self.chunks.values():
-            resources.extend(chunk.resources)
-        return resources
+        minx, maxx, minz, maxz = self.bounds
+        tx = max(minx+radius, min(maxx-radius, x+dx))
+        tz = max(minz+radius, min(maxz-radius, z+dz))
+        dx, dz = tx-x, tz-z
+        steps = max(1, math.ceil(math.hypot(dx, dz) / (radius*.5)))
+        dx, dz = dx/steps, dz/steps
+        for _ in range(steps):
+            if self.is_walkable(x+dx, z+dz, radius):
+                x, z = x+dx, z+dz
+            elif self.is_walkable(x+dx, z, radius):
+                x += dx
+            elif self.is_walkable(x, z+dz, radius):
+                z += dz
+        return x, z
 
-    def clear(self):
-        """Unload all chunks (frees all GPU VBOs)."""
-        for key in list(self.chunks.keys()):
-            self._unload(*key)
+    def line_clear(self, x, z, tx, tz, radius=.35):
+        return (self.is_walkable(tx, tz, radius) and
+                all(segment_distance(o.x, o.z, (x, z), (tx, tz)) >= radius+o.radius
+                    for o in self.obstacles))
+
+    def chase_target(self, x, z, px, pz):
+        if self.line_clear(x, z, px, pz):
+            return px, pz
+        i = self.paths.nearest_route_index(x, z)
+        j = self.paths.nearest_route_index(px, pz)
+        nearest = self.paths.route[i]
+        if math.hypot(x-nearest[0], z-nearest[1]) > .9:
+            return nearest
+        return self.paths.route[i + (1 if j > i else -1 if j < i else 0)]
+
+    def validate(self):
+
+
+        for a, b in self.paths.segments:
+            for x, z in (a, b):
+                if not self.is_walkable(x, z, self.paths.half_width):
+                    raise ValueError('Path width collides with vegetation or boundary')
+            for o in self.obstacles:
+                if segment_distance(o.x, o.z, a, b) < self.paths.half_width + o.radius:
+                    raise ValueError('Obstruction in protected path corridor')
+        for _, pos in self.resources:
+            if not self.is_walkable(pos[0], pos[2]):
+                raise ValueError('Unreachable resource')
+        if not self.is_walkable(self.encounter[0], self.encounter[2]):
+            raise ValueError('Blocked encounter')
+        samples = self.paths.samples()
+        if not all(self.is_walkable(x, z) for x, z in samples):
+            raise ValueError('Disconnected guaranteed route')
+        return {'route_samples': len(samples), 'route_length': round(self.paths.lengths[-1], 2),
+                'obstacles': len(self.obstacles), 'connected': True}

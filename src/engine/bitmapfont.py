@@ -1,6 +1,3 @@
-"""
-Embed QT's legendary 16x32 Kernos Terminal PSF2 font for the purpose of rendering fonts in this game.
-"""
 import base64
 import struct
 import pygame

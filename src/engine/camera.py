@@ -3,9 +3,7 @@ import pygame
 
 
 class Camera:
-    """First-person camera with complete movement, obstacle collision,
-    smooth terrain following, a visible head-bob and a negative pivot
-    offset."""
+
 
     def __init__(self, radius=0.4):
         self.x = 0.0
@@ -19,36 +17,34 @@ class Camera:
         self.sprint_factor = 2.9
         self.mouse_sensitivity = 0.003
 
-        # Player vitals
+
         self.max_health = 100.0
         self.health = 100.0
         self.max_stamina = 200.0
         self.stamina = 200.0
-        self.exhausted = False    # winded: sprint disabled until stamina regens
-        self.window_center = None # (width, height) set by the game loop
-        self.grab_active = False  # whether the mouse is grabbed (in-game)
+        self.exhausted = False
+        self.grab_active = False
 
 
-        # Collision radius + list of obstacles to collide with
         self.radius = radius
-        self.obstacles = []  # list of (cx, cz, r, height)
-        self.bounds = None   # (minx, maxx, minz, maxz)
+        self.obstacles = []
+        self.bounds = None
 
-        # Terrain height callback (set externally)
+
         self.terrain_height_cb = None
+        self.movement_cb = None
         self.eye_height = 1.6
 
         self.pivot_offset = -0.2
 
-        # Bobbing state (applied as a render offset, not fed back into y)
+
         self._bob_phase = 0.0
         self._bob_active = 0.0
         self.bob_offset = 0.0
 
-        # Sprint state (visual only)
+
         self.sprinting = False
 
-    # Helpers
 
     def forward_vec(self):
         return (math.sin(self.yaw), math.cos(self.yaw))
@@ -62,7 +58,7 @@ class Camera:
         return 0.0
 
     def eye_position(self):
-        """Return the effective eye position (pivot + forward offset + bob)."""
+
         fx, fz = self.forward_vec()
         ex = self.x + fx * self.pivot_offset
         ez = self.z + fz * self.pivot_offset
@@ -70,12 +66,12 @@ class Camera:
         return (ex, ey, ez)
 
     def take_damage(self, amount):
-        """Reduce the player's health and return True if still alive."""
+
         self.health = max(0.0, self.health - amount)
         return self.health > 0.0
 
     def resolve_collision(self, px, pz):
-        """Push (px, pz) out of any obstacle the player overlaps."""
+
         for (cx, cz, r, _height) in self.obstacles:
             dx = px - cx
             dz = pz - cz
@@ -90,9 +86,12 @@ class Camera:
                 px = cx + min_dist
         return px, pz
 
-    # Movement
 
-    def update(self, dt):
+    def update(self, dt, mouse_delta=None):
+        dt = max(0.0, min(dt, 0.1))
+        if not self.grab_active:
+            self.bob_offset = 0.0
+            return
         keys = pygame.key.get_pressed()
 
         fx, fz = self.forward_vec()
@@ -118,20 +117,19 @@ class Camera:
             mx /= n
             mz /= n
 
-        # Sprint is gated by stamina: it drains while sprinting and slowly
-        # regens when not sprinting.
+
         want_sprint = n > 0.0 and (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
         
-        # Block sprint when stamina is below 20%
+
         can_sprint = want_sprint and self.stamina >= 20.0
         sprinting = can_sprint and n > 0.0
         
-        # Stamina drain scales: slower at 100%, faster as it depletes
+
         if sprinting:
             drain_factor = 0.5 + 0.5 * (1.0 - self.stamina / self.max_stamina)
             self.stamina = max(0.0, self.stamina - 12.0 * dt * (0.7 + 0.3 * drain_factor))
         elif n > 0.0 and self.stamina < 20.0:
-            # Walking with low stamina still drains slowly
+
             self.stamina = max(0.0, self.stamina - 1.0 * dt)
         else:
             self.stamina = min(self.max_stamina, self.stamina + 25.0 * dt)
@@ -142,30 +140,33 @@ class Camera:
         if sprinting:
             speed = self.move_speed * self.sprint_factor
         elif self.exhausted:
-            speed = self.move_speed * 1.15  # winded: slower than a normal walk
+            speed = self.move_speed * 1.15
         else:
             speed = self.move_speed
 
         nx = self.x + mx * speed * dt
         nz = self.z + mz * speed * dt
 
-        # Obstacle collision
-        nx, nz = self.resolve_collision(nx, nz)
 
-        # Bounds: keep inside terrain
+        if self.movement_cb is not None:
+            nx, nz = self.movement_cb(self.x, self.z, nx-self.x, nz-self.z, self.radius)
+        else:
+            nx, nz = self.resolve_collision(nx, nz)
+
+
         if self.bounds is not None:
             (minx, maxx, minz, maxz) = self.bounds
-            nx = max(minx, min(maxx, nx))
-            nz = max(minz, min(maxz, nz))
+            nx = max(minx+self.radius, min(maxx-self.radius, nx))
+            nz = max(minz+self.radius, min(maxz-self.radius, nz))
 
         self.x, self.z = nx, nz
 
-        # Ground interaction (smooth terrain following)
+
         ground = self.terrain_y_at(self.x, self.z)
         target_y = ground + self.eye_height
         self.y += (target_y - self.y) * min(1.0, dt * 12.0)
 
-        # Head-bob: computed as a render offset, NOT fed back into self.y.
+
         moving = n > 0.0
         if moving:
             self._bob_active = min(1.0, self._bob_active + dt * 6.0)
@@ -174,38 +175,16 @@ class Camera:
 
         bob_speed = speed * 1.4
         self._bob_phase += dt * bob_speed * (1.0 if moving else 0.0)
-        # Vertical bob + slight lateral sway for a natural feel
+
         self.bob_offset = (
             math.sin(self._bob_phase * 2.0) * 0.06 * self._bob_active
         )
 
-        # Mouse look: recentre the cursor each frame so rotation stays
-        # unbounded (360 degrees) even when the cursor hits a screen edge.
-        center = self.window_center
-        if center is not None and self.grab_active:
-            cx, cy = center[0] // 2, center[1] // 2
-            mpx, mpy = pygame.mouse.get_pos()
-            dx = mpx - cx
-            dy = mpy - cy
-            if abs(dx) < center[0]:
-                self.yaw += dx * self.mouse_sensitivity
-            if abs(dy) < center[1]:
-                self.pitch += dy * self.mouse_sensitivity
-            pygame.mouse.set_pos(cx, cy)
-        else:
-            # Fallback: relative motion (works even when not recentring)
-            mouse_dx, mouse_dy = pygame.mouse.get_rel()
-            if abs(mouse_dx) < 200:
-                self.yaw += mouse_dx * self.mouse_sensitivity
-            if abs(mouse_dy) < 200:
-                self.pitch += mouse_dy * self.mouse_sensitivity
+        self.apply_mouse_motion(*(pygame.mouse.get_rel() if mouse_delta is None else mouse_delta))
 
-        two_pi = 2.0 * math.pi
-        self.yaw = self.yaw % two_pi
-        if self.yaw > math.pi:
-            self.yaw -= two_pi
-        elif self.yaw < -math.pi:
-            self.yaw += two_pi
-
-        # Clamp pitch to prevent gimbal lock (±85 degrees, ~1.48 radians)
-        self.pitch = max(-1.48, min(1.48, self.pitch))
+    def apply_mouse_motion(self, dx, dy):
+        # Relative motion only. No cursor teleport loop.
+        if not all(math.isfinite(v) for v in (dx, dy)) or max(abs(dx), abs(dy)) > 512:
+            return
+        self.yaw = (self.yaw + dx*self.mouse_sensitivity + math.pi) % math.tau - math.pi
+        self.pitch = max(-1.48, min(1.48, self.pitch + dy*self.mouse_sensitivity))

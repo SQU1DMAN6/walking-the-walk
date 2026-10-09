@@ -13,14 +13,14 @@ class Mesh:
         self.faces = faces
         self.colour = colour
         self.position = position
-        self.texcoords = texcoords  # list of (u, v) pairs matching vertices
-        # Optional per-vertex colours (list of (r,g,b) matching vertices).
-        # When present, these override the mesh colour for each vertex.
+        self.texcoords = texcoords
+
+
         self.vertex_colours = vertex_colours
-        # Alpha transparency for the whole mesh (0.0 fully transparent,
-        # 1.0 fully opaque). Used by semi-transparent markers.
+
+
         self.alpha = alpha
-        # Pre-computed flattened vertex data for GPU upload (set externally)
+
         self._vertex_data = None
         self._vertex_count = 0
 
@@ -61,24 +61,24 @@ def create_pyramid(
         colour,
         position
 ):
-    """Create a pyramid with a rectangular base and an apex."""
+
     hw = width / 2
     hd = depth / 2
     vertices = [
-        (-hw, -height/2, -hd),  # 0: base back-left
-        ( hw, -height/2, -hd),  # 1: base back-right
-        ( hw, -height/2,  hd),  # 2: base front-right
-        (-hw, -height/2,  hd),  # 3: base front-left
-        (0.0,  height/2, 0.0),  # 4: apex
+        (-hw, -height/2, -hd),
+        ( hw, -height/2, -hd),
+        ( hw, -height/2,  hd),
+        (-hw, -height/2,  hd),
+        (0.0,  height/2, 0.0),
     ]
 
     faces = [
-        (0, 1, 4),  # back
-        (1, 2, 4),  # right
-        (2, 3, 4),  # front
-        (3, 0, 4),  # left
-        (0, 3, 2),  # base
-        (0, 2, 1),  # base
+        (0, 1, 4),
+        (1, 2, 4),
+        (2, 3, 4),
+        (3, 0, 4),
+        (0, 3, 2),
+        (0, 2, 1),
     ]
 
     return Mesh(vertices, faces, colour, position)
@@ -89,8 +89,8 @@ def create_ground(
         colour,
         position
 ):
-    """Create a subdivided ground plane so that partial near-plane
-    clipping doesn't cause the whole mesh to disappear."""
+
+
     hw = width / 2
     hd = depth / 2
     segments = 20

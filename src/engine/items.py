@@ -1,71 +1,38 @@
-"""Item and recipe definitions for Walking the Walk 1.1."""
-
-# Item catalogue: item_id -> (display name, category, max stack size)
 ITEMS = {
-    "wood":            ("Wood",            "Resource", 20),
-    "stone":           ("Stone",           "Resource", 20),
-    "fibre":           ("Fibre",           "Resource", 30),
-    "spinifex":        ("Spinifex",        "Resource", 30),
-    "bark":            ("Eucalyptus Bark", "Resource", 20),
-    "rope":            ("Rope",            "Resource", 10),
-    "bush_tomato":     ("Bush Tomato",     "Food",      5),
-    "water":           ("Water",           "Water",     3),
-    "stone_tool":      ("Stone Tool",      "Tool",      1),
-    "spear":           ("Wooden Spear",    "Tool",      1),
-    "axe":             ("Stone Axe",       "Tool",      1),
-    "pickaxe":         ("Stone Pickaxe",   "Tool",      1),
-    "bandage":         ("Bandage",         "Medical",   5),
-    "crafting_table":  ("Crafting Table",  "Furniture", 1),
-    "didgeridoo":      ("Legendary Didgeridoo", "Legendary", 1),
+    "food": ("Canned food", "Consumable", 1),
+    "water": ("Bottled water", "Consumable", 1),
+    "metal_scrap": ("Metal scrap", "Material", 20),
+    "plastic_scrap": ("Plastic scrap", "Material", 20),
+    "stick": ("Stick", "Material", 20),
+    "rock": ("Rock", "Material", 20),
+    "compass": ("Compass", "Tool", 1),
+    "spear": ("Stone spear", "Weapon", 1),
 }
-
-
-# Crafting recipes: recipe_id -> definition
-#   materials: {item_id: qty}   output: item_id   quantity: n
 RECIPES = {
-    "crafting_table": {
-        "name": "Crafting Table",
-        "materials": {"wood": 6},
-        "output": "crafting_table",
-        "quantity": 1,
-    },
-    "rope": {
-        "name": "Rope",
-        "materials": {"fibre": 2},
-        "output": "rope",
-        "quantity": 1,
-    },
-    "stone_tool": {
-        "name": "Stone Tool",
-        "materials": {"wood": 1, "stone": 1},
-        "output": "stone_tool",
-        "quantity": 1,
-    },
-    "spear": {
-        "name": "Wooden Spear",
-        "materials": {"wood": 2, "rope": 1},
-        "output": "spear",
-        "quantity": 1,
-    },
-    "axe": {
-        "name": "Stone Axe",
-        "materials": {"wood": 2, "stone": 2},
-        "output": "axe",
-        "quantity": 1,
-    },
-    "pickaxe": {
-        "name": "Stone Pickaxe",
-        "materials": {"wood": 2, "stone": 3},
-        "output": "pickaxe",
-        "quantity": 1,
-    },
-    "bandage": {
-        "name": "Bandage",
-        "materials": {"fibre": 2, "bark": 1},
-        "output": "bandage",
-        "quantity": 1,
-    },
+    "compass": {"name": "Compass", "materials": {"metal_scrap": 1, "plastic_scrap": 1},
+                "output": "compass", "quantity": 1},
+    "spear": {"name": "Stone spear", "materials": {"stick": 2, "rock": 1},
+              "output": "spear", "quantity": 1},
 }
+RECIPE_ORDER = ["compass", "spear"]
+RESOURCE_LOOT = {
+    "can": {"food": 1},
+    "bottle": {"water": 1},
+    "stick": {"stick": 1},
+    "rock": {"rock": 1},
+}
+CONSUMED_CONTAINER = {"food": "metal_scrap", "water": "plastic_scrap"}
+HEAL_AMOUNT = 10
+PLAYER_SPEED = 3.6
+DOG_SPEED = 3.3
+SPEAR_RANGE = 3.5
+SPEAR_DAMAGE = 25
+SPEAR_COOLDOWN = 0.65
+DOG_HEALTH = 100
+DOG_DAMAGE = 20
+DOG_RANGE = 2.7
+DOG_DETECTION = 28.0
+DOG_WINDUP = 0.45
+DOG_COOLDOWN = 1.2
 
-
-RECIPE_ORDER = ["crafting_table", "rope", "stone_tool", "axe", "pickaxe", "spear", "bandage"]
+USE_DURATION = 1.0

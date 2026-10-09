@@ -1,78 +1,40 @@
-"""Procedural 3D marker meshes for level guidance."""
+from dataclasses import dataclass
 import math
-
 from engine.mesh import Mesh
+from engine.models import lathe
 
 
-def create_ring(radius=1.6, thickness=0.18, sides=24, colour=(255, 220, 60)):
-    verts = []
-    faces = []
+def create_arrow():
+
+
+    return [lathe([(.26, .055), (.66, .055)], (249, 220, 68), sides=8),
+            lathe([(.26, .11), (.30, .11)], (50, 52, 25), sides=8),
+            lathe([(0, 0), (.28, .18)], (255, 219, 55), sides=8)]
+
+
+def create_ring(position, height, radius=1.65, thickness=.18, sides=48):
+    x, _, z = position
+    verts, faces = [], []
     for i in range(sides):
-        a0 = 2.0 * math.pi * i / sides
-        a1 = 2.0 * math.pi * (i + 1) / sides
-        r_out = radius + thickness * 0.5
-        r_in = radius - thickness * 0.5
-        o = len(verts)
-        verts.extend([
-            (r_out * math.cos(a0), 0.0, r_out * math.sin(a0)),
-            (r_in * math.cos(a0), 0.0, r_in * math.sin(a0)),
-            (r_in * math.cos(a1), 0.0, r_in * math.sin(a1)),
-            (r_out * math.cos(a1), 0.0, r_out * math.sin(a1)),
-        ])
-        faces.append((o, o + 1, o + 3))      # (out0, in0, out1)
-        faces.append((o + 1, o + 2, o + 3))  # (in0, in1, out1)
-    return Mesh(verts, faces, colour, (0, 0, 0), alpha=0.5)
-
-
-def create_arrow(stem_colour=(255, 0, 0), head_colour=(255, 0, 0)):
-    # Stem: 0.06 wide, 0.35 long, pointing in +Z (smaller than before)
-    r = 0.03
-    sl = 0.35
-    sv = [
-        (-r, 0.0, 0.0), (r, 0.0, 0.0), (r, 0.0, sl), (-r, 0.0, sl),
-        (-r, 0.0, 0.0), (r, 0.0, 0.0), (r, 0.0, sl), (-r, 0.0, sl),
-    ]
-    sf = [
-        (0, 1, 2), (0, 2, 3), (4, 6, 5), (4, 7, 6),
-        (0, 4, 5), (0, 5, 1), (1, 5, 6), (1, 6, 2),
-        (2, 6, 7), (2, 7, 3), (3, 7, 4), (3, 4, 0),
-    ]
-    stem = Mesh(sv, sf, stem_colour, (0, 0, 0))
-
-    # Cone head at the tip pointing in +Z: apex at local z=sl+hl, base at z=sl
-    hr = 0.12
-    hl = 0.25
-    sides = 8
-    hv = [(0.0, 0.0, sl + hl)]
+        angle = math.tau*i/sides
+        for r in (radius-thickness/2, radius+thickness/2):
+            vx, vz = r*math.cos(angle), r*math.sin(angle)
+            verts.append((vx, height(x+vx, z+vz)-position[1]+.055, vz))
     for i in range(sides):
-        a = 2.0 * math.pi * i / sides
-        hv.append((hr * math.cos(a), 0.0, sl))
-    hf = []
-    for i in range(1, sides + 1):
-        j = 1 + (i % sides)
-        hf.append((0, i, j))
-    for i in range(1, sides - 1):
-        hf.append((1, i, i + 1))
-    head = Mesh(hv, hf, head_colour, (0, 0, 0))
-    return stem, head
+        a, b = i*2, ((i+1) % sides)*2
+        faces.extend(((a, b, a+1), (a+1, b, b+1)))
+    return Mesh(verts, faces, (119, 244, 220), (0, 0, 0))
 
 
-def create_target_ring(radius=2, thickness=0.3, sides=24, colour=(255, 200, 50)):
-    verts = []
-    faces = []
-    for i in range(sides):
-        a0 = 2.0 * math.pi * i / sides
-        a1 = 2.0 * math.pi * (i + 1) / sides
-        r_out = radius + thickness * 0.5
-        r_in = radius - thickness * 0.5
-        o = len(verts)
-        verts.extend([
-            (r_out * math.cos(a0), 0.0, r_out * math.sin(a0)),
-            (r_in * math.cos(a0), 0.0, r_in * math.sin(a0)),
-            (r_in * math.cos(a1), 0.0, r_in * math.sin(a1)),
-            (r_out * math.cos(a1), 0.0, r_out * math.sin(a1)),
-        ])
-        faces.append((o, o + 1, o + 3))      # (out0, in0, out1)
-        faces.append((o + 1, o + 2, o + 3))  # (in0, in1, out1)
-    # Each vertex gets full colour + alpha 0.5 for semi-transparency
-    return Mesh(verts, faces, colour, (0, 2, 0), alpha=0.5)
+@dataclass(frozen=True)
+class ObjectiveMarker:
+    target_id: int
+    style: str = 'arrow'
+
+    def position(self, entities, elapsed=0.0):
+        target = entities.get(self.target_id)
+        if target is None or not target.visible:
+            return None
+        x, y, z = target.position
+        offset = target.visual_height+.22+.08*math.sin(elapsed*2.5) if self.style == 'arrow' else 0
+        return x, y+offset, z

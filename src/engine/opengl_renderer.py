@@ -15,7 +15,7 @@ from engine.vector import Vec3
 
 
 def _generate_leaf_texture(size=64):
-    """Generate a procedural Australian eucalyptus leaf texture."""
+
     rng = random.Random(42)
     pixels = bytearray(size * size * 4)
 
@@ -84,7 +84,7 @@ def _generate_leaf_texture(size=64):
 
 
 def _face_normal(v0, v1, v2):
-    """Compute the normal (in object space) of a triangle."""
+
     ux = v1[0] - v0[0]
     uy = v1[1] - v0[1]
     uz = v1[2] - v0[2]
@@ -101,12 +101,8 @@ def _face_normal(v0, v1, v2):
 
 
 def _build_vertex_data(mesh):
-    """Pre-compute flattened, world-space vertex data with real per-face
-    normals and per-vertex colours. Cached on the mesh; the world is static
-    so this is baked once.
 
-    Layout per vertex: [pos xyz, normal xyz, uv xy, colour rgb] = 11 floats.
-    """
+
     if mesh._vertex_data is not None:
         return mesh._vertex_data, mesh._vertex_count
 
@@ -124,7 +120,7 @@ def _build_vertex_data(mesh):
                 data.extend(mesh.texcoords[idx])
             else:
                 data.extend([0.0, 0.0])
-            # Per-vertex colour (falls back to mesh colour)
+
             if mesh.vertex_colours is not None:
                 c = mesh.vertex_colours[idx]
                 data.extend([c[0], c[1], c[2]])
@@ -137,8 +133,8 @@ def _build_vertex_data(mesh):
 
 
 def _mesh_bake(mesh):
-    """Return flattened object-space per-triangle arrays for dynamic meshes:
-    (vertices, normals, texcoords, colours). Cached on the mesh."""
+
+
     cache = getattr(mesh, '_bake_cache', None)
     if cache is not None:
         return cache
@@ -168,9 +164,8 @@ def _mesh_bake(mesh):
 
 
 def _transform_dynamic(mesh, x, y, z, yaw=0.0):
-    """Build world-space flattened data from an object-space mesh bake,
-    applying a Y-axis rotation (yaw) and translation. Result layout:
-    [pos xyz, normal xyz, uv xy, colour rgb] per vertex."""
+
+
     verts, norms, uvs, cols = _mesh_bake(mesh)
     cy = math.cos(yaw)
     sy = math.sin(yaw)
@@ -181,7 +176,7 @@ def _transform_dynamic(mesh, x, y, z, yaw=0.0):
         vx = verts[i * 3]
         vy = verts[i * 3 + 1]
         vz = verts[i * 3 + 2]
-        # rotate around Y
+
         rx = vx * cy + vz * sy
         rz = -vx * sy + vz * cy
         out.extend([rx + x, vy + y, rz + z])
@@ -197,8 +192,8 @@ def _transform_dynamic(mesh, x, y, z, yaw=0.0):
 
 
 class BatchGroup:
-    """A group of meshes with the same colour, combined into one persistent VBO.
-    The vertex data is uploaded to the GPU exactly once at build time."""
+
+
     __slots__ = ('colour', 'use_texture', 'vertex_data', 'vertex_count', 'vbo')
 
     def __init__(self, colour, use_texture, vertex_data, vertex_count, vbo):
@@ -210,9 +205,8 @@ class BatchGroup:
 
 
 def build_batches(meshes):
-    """Group meshes by colour, compute real per-face normals and bake each
-    group into a single persistent VBO. Returns a list of BatchGroup objects,
-    one per unique colour. This makes all static geometry GPU-resident."""
+
+
     groups = {}
 
     for mesh in meshes:
@@ -233,7 +227,7 @@ def build_batches(meshes):
             combined[offset:offset + len(d)] = d
             offset += len(d)
 
-        # Upload once to a dedicated VBO (static draw)
+
         vbo = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
         arr = (gl.GLfloat * len(combined))(*combined)
@@ -253,15 +247,15 @@ class OpenGLRenderer:
         self.near = 0.1
         self.far = 200.0
 
-        # One VBO used for dynamic (moving) geometry uploads
+
         self.vao = gl.glGenVertexArrays(1)
         self.dynamic_vbo = gl.glGenBuffers(1)
 
-        # Cache of uploaded sprite textures keyed by id(surface)
+
         self._sprite_tex_cache = {}
 
-        # Per-batch uniform block location caching
-        self._batch_data = []  # (vbo, vertex_count)
+
+        self._batch_data = []
 
         vertex_src = """
         #version 330 core
@@ -298,15 +292,18 @@ class OpenGLRenderer:
             float nry = in_normal.y * u_cos_pitch - nrz * u_sin_pitch;
             float nrz2 = in_normal.y * u_sin_pitch + nrz * u_cos_pitch;
 
-            float z = max(rz2, 0.001);
             float ndc_x = rx * u_focal / (u_w * 0.5);
             float ndc_y = ry * u_focal / (u_h * 0.5);
-            float clip_z = u_far * (z - u_near) / (u_far - u_near);
-            gl_Position = vec4(ndc_x / z, ndc_y / z, clip_z / z, 1.0);
+
+
+            float clip_z = (u_far + u_near) * rz2 / (u_far - u_near)
+                         - 2.0 * u_far * u_near / (u_far - u_near);
+            // Keep real depth so stuff behind you gets clipped.
+            gl_Position = vec4(ndc_x, ndc_y, clip_z, rz2);
             v_normal = normalize(vec3(nrx, nry, nrz2));
             v_texcoord = in_texcoord;
             v_color = in_color;
-            v_viewz = z;
+            v_viewz = rz2;
         }
         """
 
@@ -319,7 +316,7 @@ class OpenGLRenderer:
         uniform bool u_use_texture;
         uniform sampler2D u_texture;
 
-        // Distance fog (atmospheric depth, outback haze)
+
         uniform vec3 u_fog_color;
         uniform float u_fog_near;
         uniform float u_fog_far;
@@ -333,7 +330,7 @@ class OpenGLRenderer:
         out vec4 f_col;
 
         void main() {
-            // Per-vertex colour (baked into the VBO) overrides the uniform
+
             vec3 base = v_color / 255.0;
             float diff = max(dot(normalize(v_normal), -u_light_dir), 0.0);
             float lit = u_ambient + u_diffuse * diff;
@@ -347,7 +344,7 @@ class OpenGLRenderer:
             vec3 final_col = base * lit;
             if (final_col.r < 0.01 && final_col.g < 0.01 && final_col.b < 0.01) discard;
 
-            // Blend into the warm outback haze with distance
+
             float fog = clamp((v_viewz - u_fog_near) / (u_fog_far - u_fog_near), 0.0, 1.0);
             final_col = mix(final_col, u_fog_color, fog);
             f_col = vec4(final_col, u_alpha);
@@ -395,18 +392,19 @@ class OpenGLRenderer:
 
         self.leaf_tex_id = _generate_leaf_texture(64)
 
-        # Warm outback sun direction (world space, normalised)
+
         sun_dir = (0.4, -0.8, 0.4)
         sd_len = math.sqrt(sun_dir[0] ** 2 + sun_dir[1] ** 2 + sun_dir[2] ** 2)
         self.sun_world = (sun_dir[0] / sd_len, sun_dir[1] / sd_len, sun_dir[2] / sd_len)
 
-        # Warm outback haze colour
+
         self.fog_color = (0.82, 0.66, 0.48)
-        # Faint fog that fully fades before the chunk boundary (render
-        # distance 2 x chunk 40 = 80 units) to hide chunk pop-in.
+
+
         self.fog_near = 25.0
         self.fog_far = 70.0
 
+        # Vertex layout: position(3), normal(3), uv(2), colour(3).
         self._stride = 11 * 4
 
     def _set_camera_uniforms(self, camera):
@@ -415,7 +413,7 @@ class OpenGLRenderer:
         cp = math.cos(-camera.pitch)
         sp = math.sin(-camera.pitch)
 
-        # Use the effective eye position (pivot + forward offset + head-bob)
+
         ex, ey, ez = camera.eye_position()
         gl.glUniform3f(self.cam_pos_loc, ex, ey, ez)
         gl.glUniform1f(self.cos_yaw_loc, cy)
@@ -423,7 +421,7 @@ class OpenGLRenderer:
         gl.glUniform1f(self.cos_pitch_loc, cp)
         gl.glUniform1f(self.sin_pitch_loc, sp)
 
-        # Light direction in camera space
+
         lx, ly, lz = self.sun_world
         rx = lx * cy + lz * sy
         rz = -lx * sy + lz * cy
@@ -440,14 +438,14 @@ class OpenGLRenderer:
         gl.glUniform1f(self.ambient_loc, 0.45)
         gl.glUniform1f(self.diffuse_loc, 0.55)
 
-        # Fog
+
         gl.glUniform3f(self.fog_color_loc, self.fog_color[0], self.fog_color[1], self.fog_color[2])
         gl.glUniform1f(self.fog_near_loc, self.fog_near)
         gl.glUniform1f(self.fog_far_loc, self.fog_far)
         gl.glUniform1f(self.alpha_loc, 1.0)
 
     def _define_attribs(self, vbo):
-        """Bind a VBO and set the four vertex attribute pointers."""
+
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
         gl.glEnableVertexAttribArray(0)
         gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(0))
@@ -459,13 +457,12 @@ class OpenGLRenderer:
         gl.glVertexAttribPointer(3, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(8 * 4))
 
     def render_frame(self, camera, batches):
-        """Render all static batches. Camera uniforms are set once; each batch
-        is a persistent VBO that only needs binding + a colour uniform + a draw
-        call. All geometry is GPU-resident."""
+
+
         gl.glUseProgram(self.shader)
         self._set_camera_uniforms(camera)
 
-        # Bind leaf texture once
+
         gl.glActiveTexture(gl.GL_TEXTURE0)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
         gl.glUniform1i(self.texture_loc, 0)
@@ -493,11 +490,8 @@ class OpenGLRenderer:
         gl.glUseProgram(0)
 
     def _surface_to_gl_texture(self, surface):
-        """Convert a pygame surface to an OpenGL texture (cached by id).
 
-        pygame Surfaces don't allow arbitrary attributes (they use __slots__),
-        so we cache the texture id in a dict keyed by id(surface) instead.
-        """
+
         import pygame
         key = id(surface)
         tex_id = self._sprite_tex_cache.get(key)
@@ -520,28 +514,23 @@ class OpenGLRenderer:
         return tex_id
 
     def render_billboard(self, camera, surface, x, y, z, width, height):
-        """Render a camera-facing textured quad (billboard) at (x, y, z).
 
-        The quad always faces the camera (billboarded around the Y axis).
-        """
+
         import pygame
         tex_id = self._surface_to_gl_texture(surface)
 
-        # Camera-facing orientation: the quad's normal points at the camera.
-        # We build the quad in camera space so it always faces the viewer.
-        # Compute the right vector in world space from the camera yaw.
+
         cy = math.cos(camera.yaw)
         sy = math.sin(camera.yaw)
-        # Right vector (perpendicular to forward, in the XZ plane)
+
         rx = cy
         rz = -sy
 
-        # Half extents
+
         hw = width * 0.5
         hh = height * 0.5
 
-        # Quad corners in world space (centred at x, y, z, facing camera)
-        # Bottom-left, bottom-right, top-right, top-left
+
         corners = [
             (x - rx * hw, y, z - rz * hw),
             (x + rx * hw, y, z + rz * hw),
@@ -549,9 +538,9 @@ class OpenGLRenderer:
             (x - rx * hw, y + hh, z - rz * hw),
         ]
 
-        # Build vertex data: pos xyz, normal (0,1,0), uv xy, colour rgb (white)
+
         data = []
-        # Two triangles: (0,1,2) and (0,2,3)
+
         for tri in ((0, 1, 2), (0, 2, 3)):
             for idx in tri:
                 cx, cyy, cz = corners[idx]
@@ -569,7 +558,7 @@ class OpenGLRenderer:
         gl.glUseProgram(self.shader)
         self._set_camera_uniforms(camera)
 
-        # Bind the sprite texture
+
         gl.glActiveTexture(gl.GL_TEXTURE0)
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
         gl.glUniform1i(self.texture_loc, 0)
@@ -580,7 +569,7 @@ class OpenGLRenderer:
         arr = (gl.GLfloat * len(data))(*data)
         gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
 
-        # White base colour so the texture shows through fully
+
         colour_array = (gl.GLfloat * 3)(255.0, 255.0, 255.0)
         gl.glUniform3fv(self.color_loc, 1, colour_array)
         gl.glUniform1i(self.use_texture_loc, 1)
@@ -596,14 +585,8 @@ class OpenGLRenderer:
         gl.glUseProgram(0)
 
     def render_mesh_dynamic(self, camera, mesh, x, y, z, yaw=0.0, alpha=None):
-        """Render a single moving mesh (e.g. an emu) by transforming it in
-        Python (rotating around Y and translating), uploading to the dynamic
-        VBO, and drawing. Used for a small number of animated entities.
 
-        If alpha is None, mesh.alpha is used (default 1.0 = opaque).
-        alpha < 1.0 renders the mesh semi-transparent (blended into the
-        scene) — used for ground guidance rings.
-        """
+
         data = _transform_dynamic(mesh, x, y, z, yaw)
         if not data:
             return
@@ -644,3 +627,10 @@ class OpenGLRenderer:
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
+
+    def close(self):
+
+        gl.glDeleteBuffers(1, [self.dynamic_vbo])
+        gl.glDeleteVertexArrays(1, [self.vao])
+        gl.glDeleteTextures([self.leaf_tex_id, *self._sprite_tex_cache.values()])
+        gl.glDeleteProgram(self.shader)

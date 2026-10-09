@@ -1,95 +1,111 @@
-"""Slot-based inventory with stacking for Walking the Walk."""
-
-from engine.items import ITEMS
-
-
-DEFAULT_CAPACITY = 12
+from engine.items import ITEMS, RECIPES, CONSUMED_CONTAINER
 
 
 class Inventory:
-    """A simple slot-based inventory.
-
-    slots is a list of [item_id, quantity] pairs. Items of the same id stack
-    up to their max stack size. Adding beyond capacity returns the leftover
-    quantity that could not fit.
-
-    Only ONE item can be held at a time (held_item is an item_id or None).
-    """
-
-    def __init__(self, capacity=DEFAULT_CAPACITY):
+    def __init__(self, capacity=9):
+        if not 1 <= capacity <= 9:
+            raise ValueError('Inventory needs 1 to 9 slots')
         self.capacity = capacity
-        self.slots = []  # list of [item_id, qty]
-        self.held_item = None  # item_id of the single held item (or None)
+        self.slots = [None] * capacity
+        self.selected_slot = 9
+
+    @property
+    def selected_item(self):
+        slot = self.slots[self.selected_slot] if self.selected_slot < self.capacity else None
+        return slot[0] if slot else None
+
+    def select_slot(self, number):
+        if number == 0:
+            self.selected_slot = 9
+        elif 1 <= number <= self.capacity:
+            self.selected_slot = number-1
+        else:
+            return False
+        return True
+
+    def number_for(self, item):
+        return next((i+1 for i, slot in enumerate(self.slots) if slot and slot[0] == item), None)
 
     def count(self, item_id):
-        """Total quantity of item_id currently held."""
-        return sum(q for iid, q in self.slots if iid == item_id)
+        return sum(slot[1] for slot in self.slots if slot and slot[0] == item_id)
 
     def has(self, item_id, qty=1):
         return self.count(item_id) >= qty
 
-    def _find_open_slot(self, item_id):
-        max_stack = ITEMS[item_id][2]
-        for s in self.slots:
-            if s[0] == item_id and s[1] < max_stack:
-                return s
-        return None
+    @staticmethod
+    def _insert(slots, item, qty):
+        limit = ITEMS[item][2]
+        for i, slot in enumerate(slots):
+            if slot and slot[0] == item and slot[1] < limit:
+                amount = min(qty, limit-slot[1])
+                slots[i] = (item, slot[1]+amount)
+                qty -= amount
+        for i, slot in enumerate(slots):
+            if slot is None and qty:
+                amount = min(qty, limit)
+                slots[i] = (item, amount)
+                qty -= amount
+        return qty == 0
 
-    def add(self, item_id, qty=1):
-        """Add qty of item_id, stacking where possible. Returns leftover."""
-        max_stack = ITEMS[item_id][2]
-        remaining = qty
-        while remaining > 0:
-            slot = self._find_open_slot(item_id)
-            if slot is not None:
-                space = max_stack - slot[1]
-                take = min(space, remaining)
-                slot[1] += take
-                remaining -= take
-            else:
-                if len(self.slots) >= self.capacity:
-                    return remaining
-                self.slots.append([item_id, 0])
-        return 0
-
-    def remove(self, item_id, qty=1):
-        """Remove up to qty of item_id. Returns True if fully removed."""
-        if self.count(item_id) < qty:
+    @staticmethod
+    def _subtract(slots, item, qty):
+        if sum(s[1] for s in slots if s and s[0] == item) < qty:
             return False
-        for s in list(self.slots):
-            if s[0] == item_id:
-                if s[1] > qty:
-                    s[1] -= qty
-                    return True
-                qty -= s[1]
-                self.slots.remove(s)
-                if qty <= 0:
-                    return True
+        for i, slot in enumerate(slots):
+            if slot and slot[0] == item and qty:
+                amount = min(qty, slot[1])
+                slots[i] = (item, slot[1]-amount) if slot[1] > amount else None
+                qty -= amount
         return True
 
-    def hold(self, item_id):
-        """Hold a single item. Clears any previously held item."""
-        if self.count(item_id) > 0:
-            self.held_item = item_id
-            return True
-        return False
+    def add_many(self, items):
+        if any(item not in ITEMS or type(qty) is not int or qty <= 0 for item, qty in items.items()):
+            return False
+        candidate = self.slots.copy()
+        for item, qty in items.items():
+            if not self._insert(candidate, item, qty):
+                return False
+        self.slots = candidate
+        return True
 
-    def release(self):
-        """Release the held item."""
-        self.held_item = None
+    def add(self, item_id, qty=1):
+        return 0 if self.add_many({item_id: qty}) else qty
+
+    def remove(self, item_id, qty=1):
+        return type(qty) is int and qty > 0 and self._subtract(self.slots, item_id, qty)
+
+    def consume_selected(self):
+        item = self.selected_item
+        scrap = CONSUMED_CONTAINER.get(item)
+        if scrap is None or self.slots[self.selected_slot][1] != 1:
+            return None
+        # Empty the container; its slot keeps the leftovers.
+        self.slots[self.selected_slot] = (scrap, 1)
+        return scrap
+
+    def _crafted_slots(self, recipe_id):
+        recipe = RECIPES.get(recipe_id)
+        if recipe is None:
+            return None
+        # Try the whole swap first. No half-finished crafts.
+        candidate = self.slots.copy()
+        for item, qty in recipe['materials'].items():
+            if not self._subtract(candidate, item, qty):
+                return None
+        if not self._insert(candidate, recipe['output'], recipe['quantity']):
+            return None
+        return candidate
+
+    def can_craft(self, recipe_id):
+        return self._crafted_slots(recipe_id) is not None
+
+    def craft(self, recipe_id):
+        candidate = self._crafted_slots(recipe_id)
+        if candidate is None:
+            return False
+        self.slots = candidate
+        return True
 
     def listed(self):
-        """Return slots as [(item_id, name, category, qty)] for UI display."""
-        out = []
-        for item_id, qty in self.slots:
-            name, category, _ = ITEMS[item_id]
-            out.append((item_id, name, category, qty))
-        return out
-
-
-# --- Item usage effects (used by main.py) ---
-USABLE_EFFECTS = {
-    "bush_tomato": {"kind": "heal", "amount": 20, "msg": "Sustenance (+20 health)."},
-    "water":       {"kind": "stamina", "amount": 40, "msg": "Refreshing drink (+40 stamina)."},
-    "bandage":     {"kind": "heal", "amount": 40, "msg": "Wound dressed (+40 health)."},
-}
+        return [(item, ITEMS[item][0], ITEMS[item][1], qty) for slot in self.slots if slot
+                for item, qty in [slot]]
