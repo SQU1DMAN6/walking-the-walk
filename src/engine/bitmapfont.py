@@ -19,9 +19,9 @@ def _parse_psf2(data):
     for i in range(numglyph):
         offset = i * bytesperglyph
         glyphs.append(glyph_data[offset:offset + bytesperglyph])
-    return width, height, bytesperglyph, glyphs
+    return width, height, glyphs
 
-_WIDTH, _HEIGHT, _BYTES_PER_GLYPH, _GLYPHS = _parse_psf2(_FONT_DATA)
+_WIDTH, _HEIGHT, _GLYPHS = _parse_psf2(_FONT_DATA)
 _BYTES_PER_ROW = (_WIDTH + 7) // 8
 
 def text_surface(text, colour=(200, 200, 200), spacing=4):

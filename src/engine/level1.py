@@ -235,7 +235,7 @@ class Level1:
         before = self.camera.health
         self.camera.health = min(self.camera.max_health, before+HEAL_AMOUNT)
         self.consumed.add(item)
-        self.notify(f'+{int(self.camera.health-before)} health. {ITEMS[scrap][0]} stays in this slot.')
+        self.notify(f'+{int(self.camera.health-before)} health.')
         self._progress()
         self._update_prompt()
         return True

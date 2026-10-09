@@ -21,10 +21,11 @@ class BitmapFont:
 
 class TutorialHUD:
     def __init__(self):
-        # One texture. No per-frame GPU clutter.
         self.texture = None
         self._font_height = None
         self._text_cache = {}
+        self._intro_start = None
+        self._intro_finished = False
         self._fonts(800)
 
     def _fonts(self, height):
@@ -122,9 +123,59 @@ class TutorialHUD:
         self.text(surface, 'Up/Down: Select    Enter: craft    C or Esc to go back.', panel.centerx, panel.bottom-45,
                   font=self.small_font, center=True)
 
+    def _draw_publisher_intro(self, width, height):
+        from OpenGL import GL as gl
+        now = pygame.time.get_ticks() / 1000.0
+        if self._intro_start is None:
+            self._intro_start = now
+
+        elapsed = now - self._intro_start
+        duration = 3.2
+
+        if elapsed >= duration:
+            self._intro_finished = True
+            return False
+
+        if elapsed < 0.8:
+            progress = elapsed / 0.8
+        elif elapsed < 2.4:
+            progress = 1.0
+        else:
+            progress = (duration - elapsed) / 0.8
+
+        progress = max(0.0, min(1.0, progress))
+        progress = progress * progress * (3.0 - 2.0 * progress)
+
+        surface = pygame.Surface((width, height))
+        surface.fill((0, 0, 0))
+
+        gold = tuple(round(c * progress) for c in (248, 221, 122))
+        white = tuple(round(c * progress) for c in (231, 239, 225))
+
+        self.text(
+            surface, "The FtR Project",
+            width // 2, height // 2 - 40,
+            gold, self.logo_font, center=True
+        )
+        self.text(
+            surface, "PRESENTS...",
+            width // 2, height // 2 + 20,
+            white, self.font, center=True
+        )
+
+        gl.glClearColor(0.0, 0.0, 0.0, 1.0)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        self.present(surface)
+        return True
+
     def draw_menu(self, menu, width, height):
         from OpenGL import GL as gl
         self._fonts(height)
+
+        if not self._intro_finished:
+            if self._draw_publisher_intro(width, height):
+                return
+
         surface = pygame.Surface((width, height), pygame.SRCALPHA)
         surface.fill((92, 165, 224))
         pygame.draw.circle(surface, (210, 228, 201), (int(width*.82), int(height*.19)), max(24, height//15))
