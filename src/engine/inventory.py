@@ -68,6 +68,10 @@ class Inventory:
         self.slots = candidate
         return True
 
+    def can_add_many(self, items):
+        candidate = self.slots.copy()
+        return all(self._insert(candidate, item, qty) for item, qty in items.items())
+
     def add(self, item_id, qty=1):
         return 0 if self.add_many({item_id: qty}) else qty
 

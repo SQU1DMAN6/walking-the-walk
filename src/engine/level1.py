@@ -8,6 +8,7 @@ from engine.items import (RESOURCE_LOOT, ITEMS, HEAL_AMOUNT, PLAYER_SPEED,
                           SPEAR_RANGE, SPEAR_DAMAGE, SPEAR_COOLDOWN, RECIPES, RECIPE_ORDER, USE_DURATION)
 from engine.markers import ObjectiveMarker, create_arrow, create_ring
 from engine import models
+from engine.prompts import WorldPrompt
 
 
 class Stage(IntEnum):
@@ -25,17 +26,17 @@ class Stage(IntEnum):
 
 
 INSTRUCTIONS = {
-    Stage.MOVEMENT: ("LET'S ROLL", 'WASD to walk. Follow the forest path.'),
-    Stage.LOOK: ('LOOK AROUND', 'Move your mouse to look around.'),
-    Stage.SUPPLIES: ('LOOT RUN', 'Follow the yellow arrows. Hit [F] to collect the marked items.'),
-    Stage.CONSUME: ('EAT STUFF', 'Pick food [{food_slot}] or water [{water_slot}], then hold [E] for a second. Each adds 10 health.'),
-    Stage.COMPASS: ('GET YOUR THINGS', '[C] opens crafting. Pick Compass, check you got the materials, then craft.'),
-    Stage.MATERIALS: ('GET MORE THINGS', 'Keep following the arrows. Hit [F] to collect the marked items.'),
-    Stage.SPEAR: ('CRAFT', 'Open with [C], pick the Stone spear, and craft it. Then use [C] to close the menu.'),
-    Stage.COMBAT: ('THAT DOG IS NOT CHILL', 'Pick spear [{spear_slot}]. Left click to thrust; back up before it bites.'),
-    Stage.BEACON: ('HOME STRETCH', 'Hold compass [{compass_slot}] and follow its red needle along the path. Hit [F] once you\'re at the turquoise ring.'),
-    Stage.COMPLETE: ('WALK COMPLETE. W PLAYER.', 'Looted, crafted, survived. Nice one, man. [R] runs it back.'),
-    Stage.DEAD: ("YOU'RE COOKED", '[R] runs it back. Aim, poke, and keep some distance.'),
+    Stage.MOVEMENT: ("LET'S ROLL", 'Press [W, A, S, D] to move along the path.'),
+    Stage.LOOK: ('LOOK AROUND', 'Move the mouse to look around.'),
+    Stage.SUPPLIES: ('FIND SUPPLIES', 'Follow yellow arrows. Press [F] near the can and bottle.'),
+    Stage.CONSUME: ('USE SUPPLIES', 'Select food or water, then hold [E]: +10 health.'),
+    Stage.COMPASS: ('CRAFT A COMPASS', 'Press [C]. Choose Compass, then [Enter] to craft.'),
+    Stage.MATERIALS: ('GATHER MATERIALS', 'Press [F] near arrows: 2 sticks and 1 rock.'),
+    Stage.SPEAR: ('CRAFT A SPEAR', 'Press [C]. Choose Stone spear, then [Enter] to craft.'),
+    Stage.COMBAT: ('DEFEAT THE DOG', 'Press [{spear_slot}] to equip spear. Left click to attack; back away before bites.'),
+    Stage.BEACON: ('FIND THE BEACON', 'Press [{compass_slot}] to hold compass. Follow its red needle to the ring.'),
+    Stage.COMPLETE: ('TUTORIAL COMPLETE', 'Press [R] to restart or [Esc] for the title.'),
+    Stage.DEAD: ('GAME OVER', 'Press [R] to retry. Attack, then back away before bites.'),
 }
 INTERACTION_RANGE = 2.2
 
@@ -63,6 +64,7 @@ class Level1:
         self.state = Stage.MOVEMENT
         self.inventory = Inventory()
         self.crafting_open = False
+        self.help_open = False
         self.selected_recipe = 0
         self.use_progress = 0.0
         self.use_item = None
@@ -76,8 +78,12 @@ class Level1:
         self.elapsed = 0.0
         self.attack_cooldown_timer = 0.0
         self.attack_anim_timer = 0.0
-        self.notification = 'Welcome to CS Jungle. Grab some supplies and get your health back.'
+        self.notification = 'CS Jungle | Follow the path'
         self.notification_timer = 5.0
+        self.objective_flash_timer = self.health_flash_timer = 0.0
+        self.health_feedback = None
+        self._prompt_id = None
+        self._sprint_blocked = False
         self.interaction_prompt = None
         self.camera.bounds = self.world.bounds
         self.camera.obstacles = [(o.x, o.z, o.radius, 2.0) for o in self.world.obstacles]
@@ -95,6 +101,7 @@ class Level1:
         self.camera.stamina = self.camera.max_stamina
         self.camera.bob_offset = 0.0
         self.camera._bob_phase = self.camera._bob_active = 0.0
+        self.camera.sprint_blocked = False
         for kind, pos in self.world.resources:
             self.entities.add(Entity(kind, *pos, meshes=models.RESOURCE_MODELS[kind](), interactable=True))
         self.beacon_id = self.entities.add(Entity('beacon', *self.world.beacon,
@@ -122,9 +129,15 @@ class Level1:
     def instruction(self):
         title, text = INSTRUCTIONS[self.state]
         if self.state == Stage.CONSUME:
-            text = ' '.join(f'{ITEMS[item][0]}: done.' if item in self.consumed else
-                            f'{ITEMS[item][0]}: pick [{self.inventory.number_for(item)}], hold E for {USE_DURATION:g}s.'
-                            for item in ('food', 'water')) + ' +10 HP each.'
+            item = next((item for item in ('food', 'water') if item not in self.consumed), 'water')
+            number = self.inventory.number_for(item)
+            text = f'Press [{number}]: {ITEMS[item][0]}. Hold [E]: +10 health.' if number else f'No {ITEMS[item][0]} available'
+        elif self.state == Stage.MATERIALS and self.inventory.selected_item != 'compass':
+            text = 'Press [{compass_slot}]: Compass. Follow arrows; [F] picks up sticks and rock.'
+        elif self.state == Stage.BEACON and self.inventory.selected_item == 'compass':
+            text = 'Follow the red needle along the path. Press [F] at the turquoise ring.'
+        elif self.state == Stage.COMBAT:
+            text = 'Left click: attack. Move back before the dog bites.' if self.inventory.selected_item == 'spear' else 'Press [{spear_slot}]: spear. Left click attacks; back away!'
         return title, text.format(**{f'{item}_slot': self.inventory.number_for(item) or '1-9'
                                     for item in ('food', 'water', 'spear', 'compass')})
 
@@ -132,6 +145,11 @@ class Level1:
         changed = self.inventory.select_slot(number)
         if changed:
             self.cancel_use()
+            item = self.inventory.selected_item
+            self.notify('Equipped '+ITEMS[item][0] if item else
+                        ('Empty hand' if number == 0 else f'Slot [{number}] is empty'), 1.8)
+        else:
+            self.notify('That slot is unavailable')
         return changed
 
     def cancel_use(self):
@@ -141,12 +159,15 @@ class Level1:
 
     def update_use(self, dt, held):
         item = self.inventory.selected_item
-        if not held or not self.active or self.crafting_open or item not in ('food', 'water'):
+        if not held or not self.active or self.crafting_open or self.help_open:
             self.cancel_use()
             return False
         if self._use_latched:
             return False
-        if self.state < Stage.CONSUME:
+        ready, reason = self.use_status()
+        if not ready:
+            self.notify(reason)
+            self._use_latched = True
             return False
         if item != self.use_item:
             self.use_progress, self.use_item = 0.0, item
@@ -158,6 +179,18 @@ class Level1:
         self._use_latched = True
         return consumed
 
+    def use_status(self):
+        item = self.inventory.selected_item
+        if item is None:
+            return False, 'Select an item first' if self.inventory.selected_slot == 9 else 'No item available'
+        if item not in ('food', 'water'):
+            return False, 'Use materials in crafting [C]' if ITEMS[item][1] == 'Material' else 'This item is not consumable'
+        if self.state < Stage.CONSUME:
+            return False, 'Collect both supplies first'
+        if self.camera.health >= self.camera.max_health and not (self.state == Stage.CONSUME and item not in self.consumed):
+            return False, 'Health already full'
+        return True, 'Hold [E]: +10 health' if self.camera.health < self.camera.max_health else 'Hold [E]: keep the scrap (health full)'
+
     def toggle_crafting(self):
         if not self.active:
             return False
@@ -168,7 +201,9 @@ class Level1:
         return True
 
     def recipe_status(self, recipe_id):
-        recipe = RECIPES[recipe_id]
+        recipe = RECIPES.get(recipe_id)
+        if recipe is None:
+            return False, 'Recipe unavailable'
         if self.inventory.has(recipe['output']):
             return False, 'Already in your pack'
         missing = [f'{qty-self.inventory.count(item)} {ITEMS[item][0]}'
@@ -193,19 +228,76 @@ class Level1:
         return ()
 
     def interaction_target(self):
+        if not self.active or self.crafting_open or self.help_open:
+            return None
         candidates = self._allowed_resources()
         if self.state == Stage.BEACON:
             candidates = self.entities.of_kind('beacon')
         nearby = [e for e in candidates if e.interactable and e.visible and
                   e.distance_to(self.camera.x, self.camera.z) <= INTERACTION_RANGE and
                   self.world.line_clear(self.camera.x, self.camera.z, e.x, e.z, .1)]
-        return min(nearby, key=lambda e: e.distance_to(self.camera.x, self.camera.z), default=None)
+        return min(nearby, key=lambda e: (self._facing(e) < .5, e.distance_to(self.camera.x, self.camera.z)), default=None)
+
+    def _facing(self, entity):
+        dx, dz = entity.x-self.camera.x, entity.z-self.camera.z
+        distance = math.hypot(dx, dz)
+        return (dx*math.sin(self.camera.yaw)+dz*math.cos(self.camera.yaw))/distance if distance > 1e-6 else 1.0
+
+    def attack_status(self):
+        if self.inventory.selected_item != 'spear':
+            number = self.inventory.number_for('spear')
+            return False, f'Press [{number}] to equip spear' if number else 'Craft a spear first [C]'
+        if self.dog is None:
+            return False, 'No hostile target nearby'
+        if self.attack_cooldown_timer > 0:
+            return False, f'Attack ready in {self.attack_cooldown_timer:.1f}s'
+        target = self.dog
+        distance = target.distance_to(self.camera.x, self.camera.z)
+        vertical = math.atan2(target.y+.6-self.camera.y, max(distance, .01))
+        if distance > SPEAR_RANGE:
+            return False, 'Move closer to the dog'
+        if self._facing(target) < math.cos(math.radians(50)) or abs(vertical+self.camera.pitch) > math.radians(65):
+            return False, 'Face the dog to attack'
+        if not self.world.line_clear(self.camera.x, self.camera.z, target.x, target.z, .1):
+            return False, 'A tree blocks the attack'
+        return True, 'Left click to attack'
+
+    def world_prompt(self):
+        if not self.active or self.crafting_open or self.help_open:
+            self._prompt_id = None
+            return None
+        target = self.interaction_target()
+        combat = self.state == Stage.COMBAT and self.dog is not None
+        if combat:
+            target = self.dog
+            limit = SPEAR_RANGE
+        else:
+            limit = INTERACTION_RANGE
+        # Two thresholds. Boundary jitter can log off.
+        if target is None or not target.visible or target.distance_to(self.camera.x, self.camera.z) > limit-(0 if target.id == self._prompt_id else .12):
+            self._prompt_id = None
+            return None
+        if not self.world.line_clear(self.camera.x, self.camera.z, target.x, target.z, .1):
+            self._prompt_id = None
+            return None
+        self._prompt_id = target.id
+        if combat:
+            ready, text = self.attack_status()
+            title = 'Dog: back away!' if target.state == 'windup' else 'Hostile dog'
+        else:
+            ready = target.kind == 'beacon' or self.inventory.can_add_many(RESOURCE_LOOT[target.kind])
+            text = ('Press [F] to finish' if target.kind == 'beacon' else 'Press [F] to pick up') if ready else 'Inventory full'
+            title = {'can': 'Food can', 'bottle': 'Water bottle', 'stick': 'Stick', 'rock': 'Rock', 'beacon': 'End beacon'}[target.kind]
+        return WorldPrompt(target.id, title, text, (target.x, target.y+target.visual_height+.3, target.z), ready)
 
     def handle_interaction(self):
-        if not self.active or self.crafting_open:
+        if not self.active or self.crafting_open or self.help_open:
             return False
         target = self.interaction_target()
         if target is None:
+            self.notify({Stage.MOVEMENT: 'Finish the movement step first', Stage.LOOK: 'Look around with the mouse first',
+                         Stage.CONSUME: 'Select supplies, then hold [E]', Stage.COMPASS: 'Open crafting with [C]',
+                         Stage.SPEAR: 'Open crafting with [C]', Stage.COMBAT: 'Equip spear; left click attacks'}.get(self.state, 'Move closer to a marked item'))
             return False
         if target.kind == 'beacon':
             self.state = Stage.COMPLETE
@@ -217,7 +309,7 @@ class Level1:
                 return False
             self.collected.add(target.kind)
             self.entities.remove(target.id)
-            self.notify('Collected: ' + ' + '.join(f'{qty} {ITEMS[item][0]}' for item, qty in loot.items()))
+            self.notify(' + '.join(f'+{qty} {ITEMS[item][0]}' for item, qty in loot.items()))
             self._progress()
         self._update_prompt()
         return True
@@ -228,20 +320,28 @@ class Level1:
         if self.state < Stage.CONSUME:
             self.notify('Grab both supplies first.')
             return False
+        ready, reason = self.use_status()
+        if not ready:
+            self.notify(reason)
+            return False
         scrap = self.inventory.consume_selected()
         if not scrap:
             self.notify('No ' + ITEMS[item][0] + ' left.')
             return False
         before = self.camera.health
         self.camera.health = min(self.camera.max_health, before+HEAL_AMOUNT)
+        self.health_feedback, self.health_flash_timer = 'heal', .65
         self.consumed.add(item)
-        self.notify(f'+{int(self.camera.health-before)} health.')
+        self.notify(f'+{int(self.camera.health-before)} health | +1 {ITEMS[scrap][0]}')
         self._progress()
         self._update_prompt()
         return True
 
     def craft(self):
-        if not self.active or not self.crafting_open:
+        if not self.active or not self.crafting_open or self.help_open:
+            return False
+        if not 0 <= self.selected_recipe < len(RECIPE_ORDER):
+            self.notify('Select an available recipe')
             return False
         recipe = RECIPE_ORDER[self.selected_recipe]
         ready, reason = self.recipe_status(recipe)
@@ -251,13 +351,17 @@ class Level1:
         if not self.inventory.craft(recipe):
             self.notify('Not enough mats or pack space.')
             return False
-        self.notify('Crafted ' + ITEMS[recipe][0] + '. Pick its number slot to hold it.')
+        self.notify(ITEMS[recipe][0]+' crafted')
         self._progress()
         self._update_prompt()
         return True
 
     def handle_attack(self):
-        if not self.active or self.crafting_open or self.inventory.selected_item != 'spear' or self.attack_cooldown_timer > 0:
+        if not self.active or self.crafting_open or self.help_open:
+            return False
+        ready, reason = self.attack_status()
+        if not ready:
+            self.notify(reason, 1.2)
             return False
         self.attack_cooldown_timer = SPEAR_COOLDOWN
         self.attack_anim_timer = .22
@@ -278,7 +382,8 @@ class Level1:
                 self.entities.remove(target.id)
                 self.dog_id = None
                 self.state = Stage.BEACON
-                self.notify('Dog down. Hold your compass and find that beacon.', 5)
+                self.objective_flash_timer = 2.5
+                self.notify('Dog defeated | Select compass', 3)
             self._update_prompt()
             return True
         return False
@@ -292,9 +397,10 @@ class Level1:
                        key=lambda p: math.hypot(p[0]-self.camera.x, p[1]-self.camera.z))
             pos = self.world.position(x, z)
         self.dog_id = self.entities.add(Dog(pos))
-        self.notify('Spear crafted. Pick its slot. That dog is lurking up ahead.', 5)
+        self.notify(f'Stone spear crafted | Equip [{self.inventory.number_for("spear")}]', 3)
 
     def _progress(self):
+        previous = self.state
         if self.state == Stage.MOVEMENT and self.movement_distance >= 2:
             self.state = Stage.LOOK
             self.look_rotation_total = 0.0
@@ -311,6 +417,8 @@ class Level1:
         elif self.state == Stage.SPEAR and self.inventory.has('spear'):
             self.state = Stage.COMBAT
             self._spawn_dog()
+        if self.state != previous:
+            self.objective_flash_timer = 2.5
 
     def objective_markers(self):
         if self.state in (Stage.SUPPLIES, Stage.MATERIALS):
@@ -331,20 +439,25 @@ class Level1:
         return relative, math.hypot(dx, dz), math.degrees(bearing) % 360
 
     def _update_prompt(self):
-        target = self.interaction_target() if self.active else None
-        self.interaction_prompt = ('F: FINISH THE WALK' if target.kind == 'beacon' else
-                                   'F: GRAB ' + target.kind.upper()) if target else None
+        prompt = self.world_prompt()
+        self.interaction_prompt = prompt.text if prompt else None
 
     def update(self, dt):
-        if self.crafting_open:
+        if self.crafting_open or self.help_open:
             return
         dt = max(0, min(dt, .1))
         self.elapsed += dt
         self.notification_timer = max(0, self.notification_timer-dt)
+        self.objective_flash_timer = max(0, self.objective_flash_timer-dt)
+        self.health_flash_timer = max(0, self.health_flash_timer-dt)
         self.attack_cooldown_timer = max(0, self.attack_cooldown_timer-dt)
         self.attack_anim_timer = max(0, self.attack_anim_timer-dt)
         x, z, yaw, pitch = self._last_pose
         if self.active:
+            blocked = self.camera.sprint_blocked
+            if blocked and not self._sprint_blocked:
+                self.notify('Low stamina | Stop to recover', 2)
+            self._sprint_blocked = blocked
             self.movement_distance += math.hypot(self.camera.x-x, self.camera.z-z)
             if self.state == Stage.LOOK:
 
@@ -354,7 +467,8 @@ class Level1:
                 damage = self.dog.update(dt, self.camera, self.world)
                 if damage:
                     self.camera.take_damage(damage)
-                    self.notify(f'Oof. -{damage} health. Back up before the next bite.', 2)
+                    self.health_feedback, self.health_flash_timer = 'damage', .65
+                    self.notify(f'-{damage} health | Back away!', 2)
                     if self.camera.health <= 0:
                         self.state = Stage.DEAD
             self._progress()

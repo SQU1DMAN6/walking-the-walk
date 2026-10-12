@@ -45,7 +45,10 @@ def render_scene(renderer, level, batches):
                 cy, sy = math.cos(entity.yaw), math.sin(entity.yaw)
                 renderer.render_mesh_dynamic(camera, mesh, entity.x+mx*cy+mz*sy,
                                              entity.y+my, entity.z-mx*sy+mz*cy, entity.yaw)
+    prompt = level.world_prompt()
     for marker in level.objective_markers():
+        if prompt and marker.target_id == prompt.target_id and marker.style == 'arrow':
+            continue
         pos = marker.position(level.entities, level.elapsed)
         if pos is None:
             continue
@@ -108,7 +111,9 @@ class Application:
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_q and event.mod & pygame.KMOD_CTRL:
             self.running = False
         elif event.type == pygame.WINDOWRESIZED:
-            self.width, self.height = max(1, event.x), max(1, event.y)
+            self.width, self.height = max(640, event.x), max(480, event.y)
+            if (self.width, self.height) != (event.x, event.y):
+                self.pointer.window.size = self.width, self.height
             gl.glViewport(0, 0, self.width, self.height)
             if self.renderer:
                 self.renderer.width, self.renderer.height = self.width, self.height
@@ -122,19 +127,35 @@ class Application:
                 self.level.cancel_use()
             self.pointer.set_active(False)
         elif self.menu.screen != Screen.TUTORIAL:
+            if self.menu.screen == Screen.TITLE and not self.hud._intro_finished:
+                if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                    # Skip the intro. Hidden buttons don't get a side quest.
+                    self.hud._intro_finished = True
+                return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE and self.menu.screen == Screen.TITLE:
                     self.running = False
                 else:
                     self.menu.key(event.key)
             elif event.type == pygame.MOUSEMOTION:
+                self.hud.mouse_pos = event.pos
                 self.menu.mouse(event.pos, self.width, self.height)
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                buttons, back = self.menu.layout(self.width, self.height)
+                for rect in (*buttons, back):
+                    if rect.collidepoint(event.pos):
+                        self.hud.press_button(rect)
                 self.menu.mouse(event.pos, self.width, self.height, clicked=True)
         elif event.type == pygame.KEYDOWN:
             level = self.level
-            if event.key == pygame.K_ESCAPE:
-                if level.crafting_open:
+            if event.key == pygame.K_h:
+                level.help_open = not level.help_open
+                level.cancel_use()
+                self.pointer.set_active(False)
+            elif event.key == pygame.K_ESCAPE:
+                if level.help_open:
+                    level.help_open = False
+                elif level.crafting_open:
                     level.toggle_crafting()
                 elif self.paused or not level.active:
                     self.return_to_title()
@@ -142,6 +163,10 @@ class Application:
                     self.paused = True
                     self.pointer.set_active(False)
                     level.cancel_use()
+            elif level.help_open:
+                return
+            elif event.key == pygame.K_RETURN and self.paused and level.active:
+                self.paused = False
             elif event.key == pygame.K_r and not level.active:
                 level.reset()
                 self.paused = False
@@ -159,9 +184,22 @@ class Application:
                     level.handle_interaction()
                 elif pygame.K_0 <= event.key <= pygame.K_9:
                     level.select_slot(event.key-pygame.K_0)
+        elif event.type == pygame.MOUSEMOTION:
+            self.hud.mouse_pos = event.pos
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.paused:
-                self.paused = False
+            if self.level.help_open:
+                return
+            if self.paused or not self.level.active:
+                action = self.hud.handle_overlay_click(self.level, event.pos, self.width, self.height, self.paused)
+                if action == 'resume':
+                    self.paused = False
+                elif action == 'restart':
+                    self.level.reset()
+                    self.paused = False
+                elif action == 'title':
+                    self.return_to_title()
+                elif action == 'quit':
+                    self.running = False
             elif self.level.crafting_open:
                 self.hud.handle_crafting_click(self.level, event.pos, self.width, self.height)
             elif self.pointer.active:
@@ -200,7 +238,7 @@ class Application:
                     self.loading_future = None
         level = self.level
         playing = self.menu.screen == Screen.TUTORIAL
-        should_capture = playing and level.active and not self.paused and not level.crafting_open and not self.smoke_test
+        should_capture = playing and level.active and not self.paused and not level.crafting_open and not level.help_open and not self.smoke_test
         self.pointer.set_active(should_capture)
         if level:
             level.camera.grab_active = should_capture
@@ -208,7 +246,7 @@ class Application:
             level.camera.update(dt, self.pointer.delta())
             level.update_use(dt, pygame.key.get_pressed()[pygame.K_e])
             level.update(dt)
-        elif playing and self.smoke_test and not self.paused and not level.crafting_open:
+        elif playing and not self.paused and not level.crafting_open and not level.help_open:
             level.update(dt)
 
     def render(self, fps=0):

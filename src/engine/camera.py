@@ -44,6 +44,7 @@ class Camera:
 
 
         self.sprinting = False
+        self.sprint_blocked = False
 
 
     def forward_vec(self):
@@ -122,6 +123,7 @@ class Camera:
         
 
         can_sprint = want_sprint and self.stamina >= 20.0
+        self.sprint_blocked = want_sprint and not can_sprint
         sprinting = can_sprint and n > 0.0
         
 

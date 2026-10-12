@@ -3,6 +3,7 @@ import pygame
 from engine.bitmapfont import text_surface
 from engine.items import ITEMS, RECIPES, RECIPE_ORDER, DOG_HEALTH, USE_DURATION
 from engine.menu import Screen, TITLE_BUTTONS, ABOUT_TEXT
+from engine.prompts import project
 
 
 class BitmapFont:
@@ -26,23 +27,26 @@ class TutorialHUD:
         self._text_cache = {}
         self._intro_start = None
         self._intro_finished = False
+        self.mouse_pos = None
+        self._pressed_rect = None
+        self._pressed_until = 0
         self._fonts(800)
 
-    def _fonts(self, height):
-        if self._font_height == height:
+    def _fonts(self, height, width=1280):
+        if self._font_height == (width, height):
             return
-        self._font_height = height
-        scale = max(.72, min(1.15, height/900))
+        self._font_height = width, height
+        scale = max(.58, min(1.15, height/900, width/1100))
         self.font = BitmapFont(scale)
         self.title_font = BitmapFont(scale*1.2)
         self.logo_font = BitmapFont(scale*1.8)
-        self.small_font = BitmapFont(scale*.75)
-        self.slot_font = BitmapFont(max(.46, scale*.58))
+        self.small_font = BitmapFont(scale*.78)
+        self.slot_font = BitmapFont(max(.40, scale*.60))
         self._text_cache.clear()
 
     def text(self, surface, text, x, y, colour=(231, 239, 225), font=None, center=False):
         font = font or self.font
-        key = (text, colour, id(font))
+        key = (text, colour, font.scale)
         rendered = self._text_cache.get(key)
         if rendered is None:
             rendered = font.render(text, True, colour)
@@ -55,6 +59,24 @@ class TutorialHUD:
     def panel(surface, rect, selected=False):
         pygame.draw.rect(surface, (12, 25, 21, 228), rect, border_radius=9)
         pygame.draw.rect(surface, (248, 221, 122) if selected else (91, 130, 105, 180), rect, 2 if selected else 1, border_radius=9)
+
+    def press_button(self, rect):
+        self._pressed_rect = tuple(rect)
+        self._pressed_until = pygame.time.get_ticks()+180
+
+    def button(self, surface, rect, label, selected=False, enabled=True):
+        hovered = self.mouse_pos is not None and rect.collidepoint(self.mouse_pos)
+        pressed = self._pressed_rect == tuple(rect) and pygame.time.get_ticks() < self._pressed_until
+        colour = (56, 63, 58) if not enabled else (48, 91, 66) if hovered else (22, 47, 37)
+        if pressed:
+            colour = (100, 91, 49)
+        pygame.draw.rect(surface, colour, rect, border_radius=8)
+        pygame.draw.rect(surface, (248, 221, 122) if selected or pressed else (126, 169, 139), rect, 2 if selected or hovered or pressed else 1, border_radius=8)
+        font = self.font
+        if font.size(label)[0] > rect.width-20:
+            font = BitmapFont(font.scale*(rect.width-20)/font.size(label)[0])
+        self.text(surface, label, rect.centerx, rect.centery-font.size('A')[1]//2,
+                  (233, 240, 225) if enabled else (176, 185, 178), font, center=True)
 
     def lines(self, text, width, font=None):
         font = font or self.font
@@ -89,9 +111,11 @@ class TutorialHUD:
         _, rows, button = self.crafting_layout(width, height)
         for i, row in enumerate(rows):
             if row.collidepoint(position):
+                self.press_button(row)
                 level.selected_recipe = i
                 return True
         if button.collidepoint(position):
+            self.press_button(button)
             return level.craft()
         return False
 
@@ -103,8 +127,7 @@ class TutorialHUD:
         self.panel(surface, panel)
         self.text(surface, 'CRAFTING TIME', panel.centerx, panel.y+20, (248, 221, 122), self.title_font, center=True)
         for i, (recipe_id, rect) in enumerate(zip(RECIPE_ORDER, rows)):
-            self.panel(surface, rect, i == level.selected_recipe)
-            self.wrapped(surface, RECIPES[recipe_id]['name'], rect.x+12, rect.y+15, rect.width-24)
+            self.button(surface, rect, RECIPES[recipe_id]['name'], i == level.selected_recipe)
         recipe_id = RECIPE_ORDER[level.selected_recipe]
         recipe = RECIPES[recipe_id]
         ready, reason = level.recipe_status(recipe_id)
@@ -117,11 +140,38 @@ class TutorialHUD:
             y += 8
         self.wrapped(surface, reason, x, y+12, button.width,
                      (143, 223, 166) if ready else (248, 221, 122), self.small_font)
-        pygame.draw.rect(surface, (59, 105, 71) if ready else (56, 63, 58), button, border_radius=7)
-        self.text(surface, 'CRAFT / ENTER' if ready else 'NOT READY', button.centerx, button.y+10,
-                  font=self.font, center=True)
-        self.text(surface, 'Up/Down: Select    Enter: craft    C or Esc to go back.', panel.centerx, panel.bottom-45,
+        self.button(surface, button, 'Press [Enter] to craft' if ready else 'Not ready', enabled=ready)
+        self.text(surface, '[Up/Down] choose | [Enter] craft | [C]/[Esc] back', panel.centerx, panel.bottom-45,
                   font=self.small_font, center=True)
+
+    @staticmethod
+    def overlay_layout(width, height):
+        panel = pygame.Rect((width-min(680, width-32))//2, (height-min(370, height-32))//2,
+                            min(680, width-32), min(370, height-32))
+        rows = [pygame.Rect(panel.x+32, panel.y+140+i*62, panel.width-64, 48) for i in range(3)]
+        return panel, rows
+
+    def handle_overlay_click(self, level, position, width, height, paused=False):
+        _, rows = self.overlay_layout(width, height)
+        for index, rect in enumerate(rows):
+            if rect.collidepoint(position):
+                self.press_button(rect)
+                return (('resume' if paused and level.active else 'restart'), 'title', 'quit')[index]
+        return None
+
+    def overlay_menu(self, surface, level, width, height, paused):
+        shade = pygame.Surface((width, height), pygame.SRCALPHA)
+        shade.fill((5, 15, 13, 218))
+        surface.blit(shade, (0, 0))
+        panel, rows = self.overlay_layout(width, height)
+        self.panel(surface, panel)
+        title = 'PAUSED' if paused and level.active else level.instruction[0]
+        self.text(surface, title, panel.centerx, panel.y+24, (248, 221, 122), self.title_font, center=True)
+        self.text(surface, 'Choose below. [Esc] returns to the title.', panel.centerx, panel.y+88,
+                  font=self.small_font, center=True)
+        first = 'Resume [Enter]' if paused and level.active else 'Restart [R]'
+        for rect, label in zip(rows, (first, 'Title screen [Esc]', 'Quit')):
+            self.button(surface, rect, label)
 
     def _draw_publisher_intro(self, width, height):
         from OpenGL import GL as gl
@@ -143,11 +193,11 @@ class TutorialHUD:
         else:
             progress = (duration - elapsed) / 0.8
 
-        progress = max(0.0, min(1.0, progress))
+        progress = max(.18, min(1.0, progress))
         progress = progress * progress * (3.0 - 2.0 * progress)
 
-        surface = pygame.Surface((width, height))
-        surface.fill((0, 0, 0))
+        surface = pygame.Surface((width, height), pygame.SRCALPHA)
+        surface.fill((12, 25, 21))
 
         gold = tuple(round(c * progress) for c in (248, 221, 122))
         white = tuple(round(c * progress) for c in (231, 239, 225))
@@ -162,6 +212,8 @@ class TutorialHUD:
             width // 2, height // 2 + 20,
             white, self.font, center=True
         )
+        self.text(surface, 'Press any key or click to continue', width//2, height-65,
+                  font=self.small_font, center=True)
 
         gl.glClearColor(0.0, 0.0, 0.0, 1.0)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
@@ -170,9 +222,9 @@ class TutorialHUD:
 
     def draw_menu(self, menu, width, height):
         from OpenGL import GL as gl
-        self._fonts(height)
+        self._fonts(height, width)
 
-        if not self._intro_finished:
+        if menu.screen == Screen.TITLE and not self._intro_finished:
             if self._draw_publisher_intro(width, height):
                 return
 
@@ -197,10 +249,8 @@ class TutorialHUD:
             self.text(surface, 'Version 0', width//2, int(height*.16)+self.logo_font.size('A')[1]+50,
                       font=self.font, center=True)
             for index, (label, button) in enumerate(zip(TITLE_BUTTONS, buttons)):
-                self.panel(surface, button, index == menu.selected)
-                self.text(surface, label, button.centerx, button.centery-self.font.size('A')[1]//2,
-                          center=True)
-            self.text(surface, 'Click or Up/Down + Enter. Ctrl+Q or Esc to quit.', width//2, height-42,
+                self.button(surface, button, label, index == menu.selected)
+            self.text(surface, 'Click a button | [Up/Down] choose | [Enter] open | [Esc] quit', width//2, height-42,
                       font=self.small_font, center=True)
         else:
             panel = pygame.Rect(24, int(height*.18), width-48, int(height*.52))
@@ -211,15 +261,14 @@ class TutorialHUD:
                 Screen.LOADING: ('HEADING INTO CS JUNGLE', 'Getting the forest ready. Hang tight.'),
             }[menu.screen]
             self.text(surface, title, width//2, panel.y+30, (248, 221, 122), self.title_font, center=True)
-            self.wrapped(surface, menu.error or message, width//2, panel.y+95, panel.width-48, center=True)
+            self.wrapped(surface, menu.error or message, width//2, panel.y+95, panel.width-48, font=self.small_font, center=True)
             if menu.screen == Screen.LOADING and not menu.error:
                 for index in range(12):
                     angle = index*math.tau/12+menu.elapsed*4
                     colour = tuple(int(value*(.3+.7*index/11)) for value in (248, 221, 122))
                     pygame.draw.circle(surface, colour,
                         (int(width/2+24*math.cos(angle)), int(panel.bottom-55+24*math.sin(angle))), 4)
-            self.panel(surface, back, True)
-            self.text(surface, 'Back to title', back.centerx, back.centery-self.font.size('A')[1]//2, center=True)
+            self.button(surface, back, 'Back to title [Esc]', True)
         gl.glClearColor(.36, .65, .88, 1)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         self.present(surface)
@@ -250,84 +299,159 @@ class TutorialHUD:
             pygame.draw.rect(surface, (162, 179, 186) if item == 'metal_scrap' else (111, 184, 209),
                              (x-11, y-8, 23, 17), border_radius=2)
 
-    def draw(self, level, width, height, fps, paused=False):
-        self._fonts(height)
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        self.text(overlay, f'{fps:.0f} FPS', width-100, 16, font=self.small_font)
-        for i, (label, value, maximum, colour) in enumerate([
-                ('HP', level.camera.health, level.camera.max_health, (116, 201, 142)),
-                ('ENERGY', level.camera.stamina, level.camera.max_stamina, (115, 173, 207))]):
-            y = 20+i*45
-            self.text(overlay, f'{label} {int(value)}/{int(maximum)}', 20, y, font=self.small_font)
-            pygame.draw.rect(overlay, (24, 40, 32), (20, y+27, 210, 9), border_radius=3)
-            pygame.draw.rect(overlay, colour, (20, y+27, int(210*max(0, min(1, value/maximum))), 9), border_radius=3)
+    @staticmethod
+    def hotbar_layout(width, height):
+        cell = min(width-32, 1160)//10
+        left, top = (width-cell*10)//2, height-84
+        return [pygame.Rect(left+i*cell, top, cell-4, 72) for i in range(10)]
 
-        bar_width = min(width-32, 1000)
-        cell_width = bar_width//10
-        bar_left, bar_y = (width-cell_width*10)//2, height-86
+    def selected_text(self, level):
+        item = level.inventory.selected_item
+        if item is None:
+            return 'Empty hand' if level.inventory.selected_slot == 9 else 'Empty slot'
+        name = ITEMS[item][0]
+        qty = level.inventory.slots[level.inventory.selected_slot][1]
+        if item in ('food', 'water'):
+            _, hint = level.use_status()
+        elif item == 'spear':
+            _, hint = level.attack_status()
+        elif item == 'compass':
+            guidance = level.compass_guidance()
+            angle, distance, _ = guidance
+            turn = 'ahead' if abs(angle) < .25 else 'right' if angle > 0 else 'left'
+            hint = f'Beacon {distance:.0f}m {turn}'
+        else:
+            hint = '[C]: crafting material'
+        return f'{name} x{qty} | {hint}'
+
+    def prompt_rect(self, level, width, height, bottom):
+        prompt = level.world_prompt()
+        if prompt is None:
+            return None
+        point = project(level.camera, prompt.position, width, height)
+        if point is None:
+            return None
+        text_width = max(self.small_font.size(prompt.title)[0], self.small_font.size(prompt.text)[0])+28
+        w = min(width-32, text_width)
+        lines = self.lines(prompt.text, w-24, self.small_font)
+        h = 22+self.small_font.size('A')[1]*(len(lines)+1)
+        x = max(16, min(width-w-16, point[0]-w/2))
+        y = max(126, min(bottom-h-10, point[1]-h-8))
+        return prompt, pygame.Rect(x, y, w, h), point
+
+    def controls_overlay(self, surface, width, height):
+        shade = pygame.Surface((width, height), pygame.SRCALPHA)
+        shade.fill((5, 15, 13, 224))
+        surface.blit(shade, (0, 0))
+        panel = pygame.Rect(16, 16, width-32, height-32)
+        self.panel(surface, panel)
+        self.text(surface, 'CONTROLS', width//2, 30, (248, 221, 122), self.title_font, center=True)
+        rows = [('W, A, S, D', 'Move'), ('Mouse', 'Look around'), ('Shift', 'Sprint; stop to recover stamina'),
+                ('F', 'Pick up / interact'), ('1-9', 'Select inventory slot'), ('0', 'Empty hand'),
+                ('Hold E', 'Use selected food / water'), ('C', 'Open / close crafting'),
+                ('Up/Down, Enter', 'Choose / craft in the menu'), ('Left click', 'Attack with equipped spear'),
+                ('H', 'Open / close these controls'), ('Esc', 'Pause / back'), ('R', 'Restart after death / completion')]
+        font = self.small_font
+        step = min(font.size('A')[1]+10, (height-135)//len(rows))
+        x = max(32, (width-min(width-64, 840))//2)
+        for index, (key, action) in enumerate(rows):
+            self.text(surface, key, x, 85+index*step, (248, 221, 122), font)
+            self.text(surface, action, x+int((width-64)*.30), 85+index*step, font=font)
+        self.text(surface, '[H] or [Esc] to return', width//2, height-56, font=font, center=True)
+
+    def draw(self, level, width, height, fps, paused=False):
+        self._fonts(height, width)
+        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        self.panel(overlay, (12, 12, 220, 105))
+        for i, (label, value, maximum, colour) in enumerate([
+                ('Health', level.camera.health, level.camera.max_health, (116, 201, 142)),
+                ('Stamina', level.camera.stamina, level.camera.max_stamina, (115, 173, 207))]):
+            y = 20+i*47
+            text = f'{label} {int(value)}/{int(maximum)}'
+            font = BitmapFont(self.small_font.scale*min(1, 198/self.small_font.size(text)[0]))
+            self.text(overlay, text, 22, y, font=font)
+            pygame.draw.rect(overlay, (42, 57, 47), (22, y+27, 198, 9), border_radius=3)
+            pygame.draw.rect(overlay, colour, (22, y+27, int(198*max(0, min(1, value/maximum))), 9), border_radius=3)
+        if level.health_flash_timer:
+            colour = (104, 240, 147) if level.health_feedback == 'heal' else (255, 116, 101)
+            pygame.draw.rect(overlay, colour, (12, 12, 220, 105), 3, border_radius=9)
+        controls_width = max(140, self.small_font.size('[H] Controls')[0]+20)
+        controls_height = self.small_font.size('A')[1]+self.slot_font.size('A')[1]+16
+        self.panel(overlay, (width-controls_width-12, 12, controls_width, controls_height))
+        self.text(overlay, '[H] Controls', width-self.small_font.size('[H] Controls')[0]-16, 16, font=self.small_font)
+        self.text(overlay, f'{fps:.0f} FPS', width-100, 20+self.small_font.size('A')[1], font=self.slot_font)
+        if level.dog and level.dog.state != 'idle':
+            rect = pygame.Rect(width-200, max(71, controls_height+20), 188, 65)
+            self.panel(overlay, rect)
+            self.text(overlay, 'Back away!' if level.dog.state == 'windup' else 'Hostile dog', rect.x+10, rect.y+8,
+                      (255, 172, 110), self.small_font)
+            pygame.draw.rect(overlay, (70, 44, 35), (rect.x+10, rect.y+43, 168, 8))
+            pygame.draw.rect(overlay, (224, 119, 85), (rect.x+10, rect.y+43, int(168*level.dog.health/DOG_HEALTH), 8))
+
         names = {'food': 'Food', 'water': 'Water', 'metal_scrap': 'Metal', 'plastic_scrap': 'Plastic',
                  'stick': 'Stick', 'rock': 'Rock', 'compass': 'Compass', 'spear': 'Spear'}
-        for i in range(10):
-            rect = pygame.Rect(bar_left+i*cell_width, bar_y, cell_width-4, 74)
+        cells = self.hotbar_layout(width, height)
+        for i, rect in enumerate(cells):
             self.panel(overlay, rect, i == level.inventory.selected_slot)
-            self.text(overlay, str(i+1) if i < 9 else '0', rect.x+7, rect.y+3, font=self.slot_font)
+            self.text(overlay, f'[{i+1 if i < 9 else 0}]', rect.x+5, rect.y+2, font=self.slot_font)
             slot = level.inventory.slots[i] if i < level.inventory.capacity else None
             if slot:
                 item, qty = slot
                 self.icon(overlay, item, rect.centerx, rect.y+34)
-                self.text(overlay, names[item], rect.centerx, rect.y+53, font=self.slot_font, center=True)
+                self.text(overlay, names[item], rect.centerx, rect.y+52, font=self.slot_font, center=True)
                 if qty > 1:
-                    self.text(overlay, str(qty), rect.right-22, rect.y+3, font=self.slot_font)
-            elif i == 9:
-                self.text(overlay, 'Hand', rect.centerx, rect.y+53, font=self.slot_font, center=True)
+                    self.text(overlay, str(qty), rect.right-22, rect.y+2, font=self.slot_font)
+            else:
+                self.text(overlay, 'Hand' if i == 9 else 'Empty', rect.centerx, rect.y+52, font=self.slot_font, center=True)
 
+        panel_width = min(width-32, 1160)
+        selection_lines = self.lines(self.selected_text(level), panel_width-24, self.small_font)
+        selection_height = len(selection_lines)*(self.small_font.size('A')[1]+2)+12
+        selection_y = cells[0].top-selection_height-8
+        self.panel(overlay, ((width-panel_width)//2, selection_y, panel_width, selection_height))
+        self.wrapped(overlay, self.selected_text(level), width//2, selection_y+6, panel_width-24,
+                     (146, 227, 182), self.small_font, center=True)
         title, instruction = level.instruction
-        panel_width = min(width-32, 1000)
-        body_lines = self.lines(instruction, panel_width-40)
-        line_height = self.font.size('A')[1]+4
-        hint = level.interaction_prompt
-        item = level.inventory.selected_item
-        if item in ('food', 'water'):
-            hint = 'Hold E to use. Snack break.'
-        guidance = level.compass_guidance()
-        if guidance:
-            angle, distance, _ = guidance
-            turn = 'ahead' if abs(angle) < .25 else 'right' if angle > 0 else 'left'
-            hint = f'Beacon {distance:.0f}m / {turn}. Keep to the path.'
-        panel_height = 22+self.title_font.size('A')[1]+len(body_lines)*line_height+(line_height+8 if hint else 0)+12
-        panel_y = bar_y-panel_height-10
+        body = self.lines(instruction, panel_width-32)
+        line_height = self.font.size('A')[1]+2
+        panel_height = 20+self.title_font.size('A')[1]+len(body)*line_height
+        panel_y = selection_y-panel_height-8
         self.panel(overlay, ((width-panel_width)//2, panel_y, panel_width, panel_height))
-        self.text(overlay, f'{min(int(level.state)+1, 10)}/10  {title}', width//2, panel_y+12,
+        self.text(overlay, f'{min(int(level.state)+1, 10)}/10  {title}', width//2, panel_y+8,
                   (248, 221, 122), self.title_font, center=True)
-        y = panel_y+20+self.title_font.size('A')[1]
-        for line in body_lines:
-            self.text(overlay, line, width//2, y, center=True)
-            y += line_height
-        if hint:
-            self.text(overlay, hint, width//2, y+4, (124, 218, 182), self.small_font, center=True)
+        self.wrapped(overlay, instruction, width//2, panel_y+14+self.title_font.size('A')[1], panel_width-32, center=True)
         if level.use_progress:
-            pygame.draw.rect(overlay, (124, 218, 182), ((width-panel_width)//2+12, panel_y+panel_height-8,
-                                                      int((panel_width-24)*level.use_progress/USE_DURATION), 4))
-        if level.notification_timer > 0 and level.notification and not level.crafting_open:
-            self.wrapped(overlay, level.notification, width//2, 164, width-64,
-                         (248, 221, 122), self.small_font, center=True)
-        if level.dog and level.dog.state != 'idle':
-            self.text(overlay, 'UNCHILL DOG', width-210, 66,
-                      (255, 172, 110), self.small_font)
-            pygame.draw.rect(overlay, (200, 113, 75), (width-210, 99, int(188*level.dog.health/DOG_HEALTH), 9))
-        if level.active and not level.crafting_open:
+            pygame.draw.rect(overlay, (124, 218, 182), ((width-panel_width)//2+10, selection_y+selection_height-5,
+                            int((panel_width-20)*level.use_progress/USE_DURATION), 3))
+
+        prompt_info = None if paused or level.help_open else self.prompt_rect(level, width, height, panel_y)
+        if prompt_info:
+            prompt, rect, point = prompt_info
+            pygame.draw.line(overlay, (224, 215, 165), rect.midbottom, point, 1)
+            self.panel(overlay, rect)
+            self.text(overlay, prompt.title, rect.centerx, rect.y+6, (248, 221, 122), self.small_font, center=True)
+            self.wrapped(overlay, prompt.text, rect.centerx, rect.y+10+self.small_font.size('A')[1], rect.width-24,
+                         (217, 241, 221) if prompt.ready else (255, 185, 130), self.small_font, center=True)
+        if (level.notification_timer > 0 and level.notification or level.objective_flash_timer) and not level.crafting_open:
+            toast_width = min(440, max(168, width-480))
+            lines = self.lines(level.notification, toast_width-20, self.small_font) if level.notification_timer else []
+            if level.objective_flash_timer:
+                lines.append('Objective complete')
+            h = 12+len(lines)*(self.small_font.size('A')[1]+2)
+            rect = pygame.Rect((width-toast_width)//2, 14, toast_width, h)
+            self.panel(overlay, rect)
+            for index, line in enumerate(lines):
+                self.text(overlay, line, rect.centerx, rect.y+6+index*(self.small_font.size('A')[1]+2),
+                          (248, 221, 122), self.small_font, center=True)
+        if level.active and not level.crafting_open and not level.help_open and not paused:
             pygame.draw.line(overlay, (241, 236, 211), (width//2-5, height//2), (width//2+5, height//2))
             pygame.draw.line(overlay, (241, 236, 211), (width//2, height//2-5), (width//2, height//2+5))
         if level.crafting_open:
             self.crafting_menu(overlay, level, width, height)
         if paused or not level.active:
-            shade = pygame.Surface((width, height), pygame.SRCALPHA)
-            shade.fill((5, 15, 13, 220))
-            overlay.blit(shade, (0, 0))
-            title = 'PAUSED. TAKE A BREATHER.' if paused and level.active else level.instruction[0]
-            subtitle = 'Click to hop back in. Esc: title. Ctrl+Q: quit.' if level.active else level.instruction[1]+' Esc: title.'
-            self.text(overlay, title, width//2, height//2-65, (248, 221, 122), self.title_font, center=True)
-            self.wrapped(overlay, subtitle, width//2, height//2, width-40, center=True)
+            self.overlay_menu(overlay, level, width, height, paused)
+        if level.help_open:
+            self.controls_overlay(overlay, width, height)
         self.present(overlay)
 
     def present(self, surface):
