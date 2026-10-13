@@ -44,12 +44,14 @@ Nearby targets show one floating action prompt. The prompt checks the real inter
 
 Controls arrive one lesson at a time. Press H whenever you need the reference. Pause, game-over and completion screens have working Resume/Restart, Title and Quit buttons. Health changes briefly highlight the health panel, and notifications expire automatically.
 
+A direction arrow names the next required resource, follows the connected paths back from branches, and flags the hostile dog. Contextual arrows highlight the actual equipment slot and the next crafting action, including a clickable Close button. Inside the beacon ring, the F finish instruction stays visible even when looking away. Beacon direction guidance requires holding the compass.
+
 Hold the compass slot to see its dial and red needle pointing toward the beacon relative to your view. Keep to the winding path. Bushes are scenery you can walk through; trees and the world boundary still stop you. Large tutorial prompts sit above the inventory bar, under a blue sky.
 
 Mouse-look uses SDL relative motion, with stale input flushed when capture changes. Opening crafting, pausing, or losing focus releases the pointer; returning to play briefly discards capture-transition motion.
 
 That's all for now.
 
-Run `bash tests/run_checks.sh` to repeat the checks. Each execution has a ten-second timeout; the runner uses SDL's offscreen OpenGL driver by default, so native pointer feel still needs a desktop playtest. See the [v0.1 usability change summary](doc/UI-UPDATE-2026_10_13.md), [requirement audit](doc/SPEC-COMPLIANCE-v0_1-2026_10_13.md), and [beginner peer checklist](doc/BEGINNER-PLAYTEST-v0_1.md).
+Run `bash tests/run_checks.sh` to repeat the checks. Each execution has a ten-second timeout; the runner uses SDL's offscreen OpenGL driver by default, so native pointer feel still needs a desktop playtest. See the [latest playtest changes and evidence](doc/PLAYTEST-UPDATE-2026_10_13.md), [requirement audit](doc/SPEC-COMPLIANCE-v0_1-2026_10_13.md), and [beginner peer checklist](doc/BEGINNER-PLAYTEST-v0_1.md).
 
 _Walking the Walk, Version 0, Written by Quan Thai, October 2026_

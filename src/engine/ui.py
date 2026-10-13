@@ -4,6 +4,7 @@ from engine.bitmapfont import text_surface
 from engine.items import ITEMS, RECIPES, RECIPE_ORDER, DOG_HEALTH, USE_DURATION
 from engine.menu import Screen, TITLE_BUTTONS, ABOUT_TEXT
 from engine.prompts import project
+from engine.level1 import Stage
 
 
 class BitmapFont:
@@ -98,6 +99,25 @@ class TutorialHUD:
             y += step
         return y
 
+    def coach(self, surface, text, target, rect):
+        rect = rect.copy()
+        rect.height = max(rect.height, len(self.lines(text, rect.width-16, self.small_font))*(self.small_font.size('A')[1]+4)+10)
+        pygame.draw.line(surface, (255, 229, 123), rect.midbottom, target, 2)
+        dx, dy = target[0]-rect.centerx, target[1]-rect.bottom
+        length = max(1, math.hypot(dx, dy))
+        ux, uy = dx/length, dy/length
+        pygame.draw.polygon(surface, (255, 229, 123), [target,
+            (target[0]-ux*10-uy*5, target[1]-uy*10+ux*5),
+            (target[0]-ux*10+uy*5, target[1]-uy*10-ux*5)])
+        self.panel(surface, rect, True)
+        self.wrapped(surface, text, rect.centerx, rect.y+5, rect.width-16,
+                     (255, 235, 155), self.small_font, center=True)
+
+    @staticmethod
+    def crafting_close_rect(width, height):
+        panel, _, _ = TutorialHUD.crafting_layout(width, height)
+        return pygame.Rect(panel.right-134, panel.y+14, 116, 44)
+
     @staticmethod
     def crafting_layout(width, height):
         panel = pygame.Rect((width-min(880, width-32))//2, (height-min(570, height-32))//2,
@@ -108,6 +128,10 @@ class TutorialHUD:
         return panel, rows, button
 
     def handle_crafting_click(self, level, position, width, height):
+        close = self.crafting_close_rect(width, height)
+        if close.collidepoint(position):
+            self.press_button(close)
+            return level.toggle_crafting()
         _, rows, button = self.crafting_layout(width, height)
         for i, row in enumerate(rows):
             if row.collidepoint(position):
@@ -126,6 +150,8 @@ class TutorialHUD:
         panel, rows, button = self.crafting_layout(width, height)
         self.panel(surface, panel)
         self.text(surface, 'CRAFTING TIME', panel.centerx, panel.y+20, (248, 221, 122), self.title_font, center=True)
+        close = self.crafting_close_rect(width, height)
+        self.button(surface, close, 'Close [C]')
         for i, (recipe_id, rect) in enumerate(zip(RECIPE_ORDER, rows)):
             self.button(surface, rect, RECIPES[recipe_id]['name'], i == level.selected_recipe)
         recipe_id = RECIPE_ORDER[level.selected_recipe]
@@ -143,6 +169,22 @@ class TutorialHUD:
         self.button(surface, button, 'Press [Enter] to craft' if ready else 'Not ready', enabled=ready)
         self.text(surface, '[Up/Down] choose | [Enter] craft | [C]/[Esc] back', panel.centerx, panel.bottom-45,
                   font=self.small_font, center=True)
+        guidance = level.action_coach()
+        if guidance:
+            expected = 0 if level.state == Stage.COMPASS else 1
+            if guidance.kind == 'recipe':
+                target = rows[expected].midbottom
+                rect = pygame.Rect(rows[expected].x, rows[-1].bottom+15, rows[expected].width, 56)
+            elif guidance.kind == 'craft':
+                target = button.midtop
+                rect = pygame.Rect(button.x, button.y-56, button.width, 42)
+            elif guidance.kind == 'close':
+                target = close.midbottom
+                rect = pygame.Rect(close.x-80, rows[-1].bottom+15, close.width+80, 56)
+            else:
+                target = (button.centerx, panel.y+125)
+                rect = pygame.Rect(button.x, button.y-56, button.width, 42)
+            self.coach(surface, guidance.text, target, rect)
 
     @staticmethod
     def overlay_layout(width, height):
@@ -250,6 +292,12 @@ class TutorialHUD:
                       font=self.font, center=True)
             for index, (label, button) in enumerate(zip(TITLE_BUTTONS, buttons)):
                 self.button(surface, button, label, index == menu.selected)
+            rect = pygame.Rect(buttons[1].right+10, buttons[1].y, min(180, width-buttons[1].right-26), buttons[1].height)
+            if rect.width >= 140:
+                self.coach(surface, 'Start with Tutorial', buttons[1].midright, rect)
+            else:
+                self.text(surface, 'Start here: Tutorial', width//2, buttons[2].bottom+12,
+                          (248, 221, 122), self.small_font, center=True)
             self.text(surface, 'Click a button | [Up/Down] choose | [Enter] open | [Esc] quit', width//2, height-42,
                       font=self.small_font, center=True)
         else:
@@ -323,6 +371,23 @@ class TutorialHUD:
         else:
             hint = '[C]: crafting material'
         return f'{name} x{qty} | {hint}'
+
+    def direction_panel(self, surface, guidance):
+        font = self.small_font
+        title = self.lines(guidance.name, 146, font)
+        detail = self.lines(f'{guidance.remaining} left | {guidance.distance:.0f}m', 146, font)
+        rect = pygame.Rect(12, 126, 210, 22+(len(title)+len(detail))*(font.size('A')[1]+4))
+        self.panel(surface, rect)
+        colour = (255, 164, 104) if guidance.danger else (255, 229, 123)
+        cx, cy = rect.x+26, rect.centery
+        ca, sa = math.cos(guidance.relative), math.sin(guidance.relative)
+        points = [(0, -18), (-10, 0), (-4, 0), (-4, 18), (4, 18), (4, 0), (10, 0)]
+        pygame.draw.polygon(surface, colour, [(cx+x*ca-y*sa, cy+x*sa+y*ca) for x, y in points])
+        y = rect.y+10
+        for line in title+detail:
+            self.text(surface, line, rect.x+56, y, colour, font)
+            y += font.size('A')[1]+4
+        return rect
 
     def prompt_rect(self, level, width, height, bottom):
         prompt = level.world_prompt()
@@ -405,11 +470,15 @@ class TutorialHUD:
                 self.text(overlay, 'Hand' if i == 9 else 'Empty', rect.centerx, rect.y+52, font=self.slot_font, center=True)
 
         panel_width = min(width-32, 1160)
-        selection_lines = self.lines(self.selected_text(level), panel_width-24, self.small_font)
+        coaching = level.action_coach() if not paused else None
+        slot_coaching = coaching is not None and coaching.kind in ('slot', 'use')
+        selected = self.selected_text(level).split(' | ')[0] if slot_coaching else self.selected_text(level)
+        selection_lines = self.lines(selected, panel_width-24, self.small_font)
         selection_height = len(selection_lines)*(self.small_font.size('A')[1]+2)+12
         selection_y = cells[0].top-selection_height-8
         self.panel(overlay, ((width-panel_width)//2, selection_y, panel_width, selection_height))
-        self.wrapped(overlay, self.selected_text(level), width//2, selection_y+6, panel_width-24,
+        selection_center = int(width*.75 if coaching.slot < 5 else width*.25) if slot_coaching else width//2
+        self.wrapped(overlay, selected, selection_center, selection_y+6, panel_width//2-24 if slot_coaching else panel_width-24,
                      (146, 227, 182), self.small_font, center=True)
         title, instruction = level.instruction
         body = self.lines(instruction, panel_width-32)
@@ -420,13 +489,27 @@ class TutorialHUD:
         self.text(overlay, f'{min(int(level.state)+1, 10)}/10  {title}', width//2, panel_y+8,
                   (248, 221, 122), self.title_font, center=True)
         self.wrapped(overlay, instruction, width//2, panel_y+14+self.title_font.size('A')[1], panel_width-32, center=True)
+        if slot_coaching:
+            cell = cells[coaching.slot]
+            pygame.draw.rect(overlay, (255, 229, 123), cell, 3, border_radius=9)
+            text_width = min(panel_width//2-12, self.small_font.size(coaching.text)[0]+20)
+            x = max(16, min(width-text_width-16, cell.centerx-text_width//2))
+            rect = pygame.Rect(x, selection_y, text_width, selection_height)
+            self.coach(overlay, coaching.text, (cell.centerx, cell.top-2), rect)
+        elif coaching and coaching.kind in ('open', 'finish'):
+            pygame.draw.rect(overlay, (255, 229, 123), ((width-panel_width)//2, panel_y, panel_width, panel_height), 3, border_radius=9)
         if level.use_progress:
-            pygame.draw.rect(overlay, (124, 218, 182), ((width-panel_width)//2+10, selection_y+selection_height-5,
-                            int((panel_width-20)*level.use_progress/USE_DURATION), 3))
+            pygame.draw.rect(overlay, (38, 59, 45), ((width-panel_width)//2+10, selection_y+selection_height-7, panel_width-20, 5))
+            pygame.draw.rect(overlay, (124, 218, 182), ((width-panel_width)//2+10, selection_y+selection_height-7,
+                            int((panel_width-20)*level.use_progress/USE_DURATION), 5))
 
+        direction = None if paused else level.objective_direction()
+        direction_rect = self.direction_panel(overlay, direction) if direction else None
         prompt_info = None if paused or level.help_open else self.prompt_rect(level, width, height, panel_y)
         if prompt_info:
             prompt, rect, point = prompt_info
+            if direction_rect and rect.colliderect(direction_rect):
+                rect.x = min(width-rect.width-16, direction_rect.right+10)
             pygame.draw.line(overlay, (224, 215, 165), rect.midbottom, point, 1)
             self.panel(overlay, rect)
             self.text(overlay, prompt.title, rect.centerx, rect.y+6, (248, 221, 122), self.small_font, center=True)

@@ -12,7 +12,10 @@ def create_arrow():
             lathe([(0, 0), (.28, .18)], (255, 219, 55), sides=8)]
 
 
-def create_ring(position, height, radius=1.65, thickness=.18, sides=48):
+BEACON_RING_RADIUS = 1.65
+
+
+def create_ring(position, height, radius=BEACON_RING_RADIUS, thickness=.18, sides=48):
     x, _, z = position
     verts, faces = [], []
     for i in range(sides):

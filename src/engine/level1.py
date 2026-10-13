@@ -6,9 +6,10 @@ from engine.entity import Entity, EntityManager, Dog
 from engine.inventory import Inventory
 from engine.items import (RESOURCE_LOOT, ITEMS, HEAL_AMOUNT, PLAYER_SPEED,
                           SPEAR_RANGE, SPEAR_DAMAGE, SPEAR_COOLDOWN, RECIPES, RECIPE_ORDER, USE_DURATION)
-from engine.markers import ObjectiveMarker, create_arrow, create_ring
+from engine.markers import ObjectiveMarker, create_arrow, create_ring, BEACON_RING_RADIUS
 from engine import models
 from engine.prompts import WorldPrompt
+from engine.guidance import PathGuide, ObjectiveDirection, ActionCoach
 
 
 class Stage(IntEnum):
@@ -45,6 +46,7 @@ class Level1:
     def __init__(self, camera, seed=67):
         self.camera = camera
         self.world = TutorialChunk(seed)
+        self.path_guide = PathGuide(self.world.paths)
         self.arrow_meshes = create_arrow()
         self.ring_mesh = create_ring(self.world.beacon, self.world.height)
         self.weapon_meshes = models.spear()
@@ -134,12 +136,75 @@ class Level1:
             text = f'Press [{number}]: {ITEMS[item][0]}. Hold [E]: +10 health.' if number else f'No {ITEMS[item][0]} available'
         elif self.state == Stage.MATERIALS and self.inventory.selected_item != 'compass':
             text = 'Press [{compass_slot}]: Compass. Follow arrows; [F] picks up sticks and rock.'
+        elif self.in_beacon_ring:
+            text = 'Inside the ring. Press [F] to finish the tutorial.'
         elif self.state == Stage.BEACON and self.inventory.selected_item == 'compass':
             text = 'Follow the red needle along the path. Press [F] at the turquoise ring.'
         elif self.state == Stage.COMBAT:
             text = 'Left click: attack. Move back before the dog bites.' if self.inventory.selected_item == 'spear' else 'Press [{spear_slot}]: spear. Left click attacks; back away!'
         return title, text.format(**{f'{item}_slot': self.inventory.number_for(item) or '1-9'
                                     for item in ('food', 'water', 'spear', 'compass')})
+
+    @property
+    def in_beacon_ring(self):
+        return (self.state == Stage.BEACON and self.active and
+                math.hypot(self.camera.x-self.world.beacon[0], self.camera.z-self.world.beacon[2]) <= BEACON_RING_RADIUS)
+
+    def action_coach(self):
+        if not self.active or self.help_open:
+            return None
+        if self.crafting_open:
+            expected = 'compass' if self.state == Stage.COMPASS else 'spear' if self.state == Stage.SPEAR else None
+            if expected is None:
+                return ActionCoach('close', 'Close menu [C]')
+            if RECIPE_ORDER[self.selected_recipe] != expected:
+                return ActionCoach('recipe', 'Choose '+ITEMS[expected][0])
+            ready, _ = self.recipe_status(expected)
+            return ActionCoach('craft', 'Press [Enter] to craft') if ready else ActionCoach('ingredients', 'Check the missing ingredients')
+        if self.in_beacon_ring:
+            return ActionCoach('finish', 'Press [F] to finish')
+        item = None
+        if self.state == Stage.CONSUME:
+            item = next((item for item in ('food', 'water') if item not in self.consumed), None)
+        elif self.state in (Stage.MATERIALS, Stage.BEACON):
+            item = 'compass'
+        elif self.state == Stage.COMBAT:
+            item = 'spear'
+        if item and self.inventory.number_for(item):
+            number = self.inventory.number_for(item)
+            if self.inventory.selected_item != item:
+                return ActionCoach('slot', f'Press [{number}]: '+ITEMS[item][0], number-1)
+            if item in ('food', 'water'):
+                text = f'Hold [E]: using {round(100*self.use_progress/USE_DURATION)}%' if self.use_progress else 'Hold [E] until the bar fills'
+                return ActionCoach('use', text, number-1)
+        if self.state in (Stage.COMPASS, Stage.SPEAR):
+            return ActionCoach('open', 'Press [C] to open crafting')
+        return None
+
+    def objective_direction(self):
+        if not self.active or self.crafting_open or self.help_open or self.in_beacon_ring:
+            return None
+        targets = self._allowed_resources()
+        if self.state == Stage.COMBAT:
+            targets = (self.dog,) if self.dog else ()
+        elif self.state == Stage.BEACON:
+            if self.inventory.selected_item != 'compass':
+                return None
+            targets = self.entities.of_kind('beacon')
+        targets = [target for target in targets if target.visible]
+        if not targets:
+            return None
+        source = self.camera.x, self.camera.z
+        target = min(targets, key=lambda entity: self.path_guide.route(source, (entity.x, entity.z))[1])
+        goal = target.x, target.z
+        direct_range = SPEAR_RANGE+2 if target.kind == 'dog' else INTERACTION_RANGE
+        direct = math.dist(source, goal) <= direct_range and self.world.line_clear(*source, *goal)
+        point = goal if direct else self.path_guide.next_waypoint(source, goal)
+        bearing = math.atan2(point[0]-source[0], point[1]-source[1])
+        relative = (bearing-self.camera.yaw+math.pi) % math.tau-math.pi
+        names = {'can': 'Food can', 'bottle': 'Water bottle', 'stick': 'Stick', 'rock': 'Rock', 'dog': 'HOSTILE DOG', 'beacon': 'End beacon'}
+        return ObjectiveDirection(target.id, names[target.kind], relative, math.dist(source, goal),
+                                  len(targets), self.world.position(*point), target.kind == 'dog')
 
     def select_slot(self, number):
         changed = self.inventory.select_slot(number)
