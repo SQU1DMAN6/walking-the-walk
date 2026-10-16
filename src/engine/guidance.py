@@ -61,5 +61,4 @@ class PathGuide:
             return goal
         if math.dist(source, route[0]) > .9:
             return route[0]
-        # Wrong branch? Forest shortcuts aren't the tutorial meta.
         return next((point for point in route[1:] if math.dist(source, point) >= 1.5), goal)

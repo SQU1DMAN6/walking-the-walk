@@ -5,7 +5,7 @@ from engine.chunk import TutorialChunk
 from engine.entity import Entity, EntityManager, Dog
 from engine.inventory import Inventory
 from engine.items import (RESOURCE_LOOT, ITEMS, HEAL_AMOUNT, PLAYER_SPEED,
-                          SPEAR_RANGE, SPEAR_DAMAGE, SPEAR_COOLDOWN, RECIPES, RECIPE_ORDER, USE_DURATION)
+                          SPEAR_RANGE, SPEAR_DAMAGE, SPEAR_COOLDOWN, SPEAR_ANIMATION, RECIPES, RECIPE_ORDER, USE_DURATION)
 from engine.markers import ObjectiveMarker, create_arrow, create_ring, BEACON_RING_RADIUS
 from engine import models
 from engine.prompts import WorldPrompt
@@ -32,7 +32,7 @@ INSTRUCTIONS = {
     Stage.SUPPLIES: ('FIND SUPPLIES', 'Follow yellow arrows. Press [F] near the can and bottle.'),
     Stage.CONSUME: ('USE SUPPLIES', 'Select food or water, then hold [E]: +10 health.'),
     Stage.COMPASS: ('CRAFT A COMPASS', 'Press [C]. Choose Compass, then [Enter] to craft.'),
-    Stage.MATERIALS: ('GATHER MATERIALS', 'Press [F] near arrows: 2 sticks and 1 rock.'),
+    Stage.MATERIALS: ('GATHER MATERIALS', 'Press [F] near the arrows. Pick up 2 sticks and 1 rock.'),
     Stage.SPEAR: ('CRAFT A SPEAR', 'Press [C]. Choose Stone spear, then [Enter] to craft.'),
     Stage.COMBAT: ('DEFEAT THE DOG', 'Press [{spear_slot}] to equip spear. Left click to attack; back away before bites.'),
     Stage.BEACON: ('FIND THE BEACON', 'Press [{compass_slot}] to hold compass. Follow its red needle to the ring.'),
@@ -133,15 +133,15 @@ class Level1:
         if self.state == Stage.CONSUME:
             item = next((item for item in ('food', 'water') if item not in self.consumed), 'water')
             number = self.inventory.number_for(item)
-            text = f'Press [{number}]: {ITEMS[item][0]}. Hold [E]: +10 health.' if number else f'No {ITEMS[item][0]} available'
+            text = f'Press [{number}] to equip {ITEMS[item][0]}. Hold [E] to use. Using this item adds 10 health.' if number else f'No {ITEMS[item][0]} available'
         elif self.state == Stage.MATERIALS and self.inventory.selected_item != 'compass':
-            text = 'Press [{compass_slot}]: Compass. Follow arrows; [F] picks up sticks and rock.'
+            text = 'Press [{compass_slot}] to equip Compass. Follow arrows and use [F] to pick up sticks and rock.'
         elif self.in_beacon_ring:
-            text = 'Inside the ring. Press [F] to finish the tutorial.'
+            text = 'You\'re nside the ring. Press [F] to finish the tutorial.'
         elif self.state == Stage.BEACON and self.inventory.selected_item == 'compass':
-            text = 'Follow the red needle along the path. Press [F] at the turquoise ring.'
+            text = 'Follow the red needle along the path. Press [F] once you\'re inside the turquoise ring.'
         elif self.state == Stage.COMBAT:
-            text = 'Left click: attack. Move back before the dog bites.' if self.inventory.selected_item == 'spear' else 'Press [{spear_slot}]: spear. Left click attacks; back away!'
+            text = 'Left click to attack, then immediately back before the dog bites.' if self.inventory.selected_item == 'spear' else 'Press [{spear_slot}] to equip spear. Left click attacks, then back away!'
         return title, text.format(**{f'{item}_slot': self.inventory.number_for(item) or '1-9'
                                     for item in ('food', 'water', 'spear', 'compass')})
 
@@ -173,7 +173,7 @@ class Level1:
         if item and self.inventory.number_for(item):
             number = self.inventory.number_for(item)
             if self.inventory.selected_item != item:
-                return ActionCoach('slot', f'Press [{number}]: '+ITEMS[item][0], number-1)
+                return ActionCoach('slot', f'Press [{number}] to equip '+ITEMS[item][0], number-1)
             if item in ('food', 'water'):
                 text = f'Hold [E]: using {round(100*self.use_progress/USE_DURATION)}%' if self.use_progress else 'Hold [E] until the bar fills'
                 return ActionCoach('use', text, number-1)
@@ -429,7 +429,7 @@ class Level1:
             self.notify(reason, 1.2)
             return False
         self.attack_cooldown_timer = SPEAR_COOLDOWN
-        self.attack_anim_timer = .22
+        self.attack_anim_timer = SPEAR_ANIMATION
         target = self.dog
         if target is None:
             return False

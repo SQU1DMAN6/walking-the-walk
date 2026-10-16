@@ -2,7 +2,7 @@
 
 ### Written by Quan Thai
 
-### Current release: Version 0
+### Current release: Version 0.5
 
 A first-person survival and navigation tutorial set in **CS Jungle**. Follow winding forest paths, scavenge a can and bottle, recover your health, turn their scrap into a compass, gather a spear's materials, survive a hostile dog, and find the end beacon. At least... that's the tutorial level.
 
@@ -16,6 +16,8 @@ Use Python with the dependencies in `requirements.txt` and an OpenGL 3.3 compati
 python -m pip install -r requirements.txt
 python src/main.py
 ```
+
+In future, pre-build binaries targeting Windows and Linux will be made and deployed with each release.
 
 The game starts fullscreen at the desktop resolution. Want a window? Run `wtw-venv/bin/python src/main.py --windowed`; `--width` and `--height` flags set its initial size (1280×800 by default). Choose another reproducible world with `--seed <seed>`.
 
@@ -42,16 +44,16 @@ The tutorial starts at 80/100 health. Each consumable heals 10 up to 100. Collec
 
 Nearby targets show one floating action prompt. The prompt checks the real interaction range, equipped spear, aim and attack cooldown. Selecting a slot confirms its item and shows its name, count and available action above the inventory bar. Full inventory, unavailable use, cooldown and low stamina have short explanations. Extra consumables stay in your pack when health is full; the two required tutorial containers can still be opened for scrap to keep progression possible.
 
-Controls arrive one lesson at a time. Press H whenever you need the reference. Pause, game-over and completion screens have working Resume/Restart, Title and Quit buttons. Health changes briefly highlight the health panel, and notifications expire automatically.
+Each new lesson appears at screen centre with a slow red pulse for 1.5 seconds, then slides down over 0.45 seconds into a slightly smaller yellow reminder above the inventory. Inside the beacon ring, the F finish instruction sits at screen centre and remains visible in every look direction. Press H whenever you need the reference. Pause, game-over and completion screens have working Resume/Restart, Title and Quit buttons. Health changes briefly highlight the health panel, and notifications expire automatically.
 
 A direction arrow names the next required resource, follows the connected paths back from branches, and flags the hostile dog. Contextual arrows highlight the actual equipment slot and the next crafting action, including a clickable Close button. Inside the beacon ring, the F finish instruction stays visible even when looking away. Beacon direction guidance requires holding the compass.
 
-Hold the compass slot to see its dial and red needle pointing toward the beacon relative to your view. Keep to the winding path. Bushes are scenery you can walk through; trees and the world boundary still stop you. Large tutorial prompts sit above the inventory bar, under a blue sky.
+Hold the compass slot to see its dial and red needle pointing toward the beacon relative to your view. Keep to the winding path. Bushes are scenery you can walk through; trees and the world boundary still stop you. Tutorial instructions sit near screen centre, under a blue sky.
+
+The spear eases through preparation, thrust and recovery; each click can land another hit after 0.38 seconds. The dog crouches, opens its jaw, lunges and recovers, with animated legs while chasing. Its 0.45-second bite warning gives time to back away, followed by a 0.65-second cooldown. The spear still reaches farther and the player still moves faster than the dog.
 
 Mouse-look uses SDL relative motion, with stale input flushed when capture changes. Opening crafting, pausing, or losing focus releases the pointer; returning to play briefly discards capture-transition motion.
 
 That's all for now.
 
-Run `bash tests/run_checks.sh` to repeat the checks. Each execution has a ten-second timeout; the runner uses SDL's offscreen OpenGL driver by default, so native pointer feel still needs a desktop playtest. See the [latest playtest changes and evidence](doc/PLAYTEST-UPDATE-2026_10_13.md), [requirement audit](doc/SPEC-COMPLIANCE-v0_1-2026_10_13.md), and [beginner peer checklist](doc/BEGINNER-PLAYTEST-v0_1.md).
-
-_Walking the Walk, Version 0, Written by Quan Thai, October 2026_
+_Walking the Walk, Version 0.5, Written by Quan Thai, October 2026_

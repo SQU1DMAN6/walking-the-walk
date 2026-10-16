@@ -5,6 +5,7 @@ from engine.items import ITEMS, RECIPES, RECIPE_ORDER, DOG_HEALTH, USE_DURATION
 from engine.menu import Screen, TITLE_BUTTONS, ABOUT_TEXT
 from engine.prompts import project
 from engine.level1 import Stage
+from engine.animation import ease
 
 
 class BitmapFont:
@@ -31,6 +32,8 @@ class TutorialHUD:
         self.mouse_pos = None
         self._pressed_rect = None
         self._pressed_until = 0
+        self._lesson_key = None
+        self._lesson_since = 0.0
         self._fonts(800)
 
     def _fonts(self, height, width=1280):
@@ -372,11 +375,16 @@ class TutorialHUD:
             hint = '[C]: crafting material'
         return f'{name} x{qty} | {hint}'
 
-    def direction_panel(self, surface, guidance):
+    def direction_panel(self, surface, guidance, lesson=None):
         font = self.small_font
         title = self.lines(guidance.name, 146, font)
         detail = self.lines(f'{guidance.remaining} left | {guidance.distance:.0f}m', 146, font)
         rect = pygame.Rect(12, 126, 210, 22+(len(title)+len(detail))*(font.size('A')[1]+4))
+        if lesson and rect.colliderect(lesson):
+            if lesson.top-rect.height >= 117:
+                rect.bottom = lesson.top
+            else:
+                rect.top = lesson.bottom+12
         self.panel(surface, rect)
         colour = (255, 164, 104) if guidance.danger else (255, 229, 123)
         cx, cy = rect.x+26, rect.centery
@@ -397,7 +405,7 @@ class TutorialHUD:
         if point is None:
             return None
         text_width = max(self.small_font.size(prompt.title)[0], self.small_font.size(prompt.text)[0])+28
-        w = min(width-32, text_width)
+        w = min(width//2-40, 360, text_width)
         lines = self.lines(prompt.text, w-24, self.small_font)
         h = 22+self.small_font.size('A')[1]*(len(lines)+1)
         x = max(16, min(width-w-16, point[0]-w/2))
@@ -423,6 +431,46 @@ class TutorialHUD:
             self.text(surface, key, x, 85+index*step, (248, 221, 122), font)
             self.text(surface, action, x+int((width-64)*.30), 85+index*step, font=font)
         self.text(surface, '[H] or [Esc] to return', width//2, height-56, font=font, center=True)
+
+    def lesson_progress(self, level):
+        key = (level.inventory, level.state, level.instruction[1], level.in_beacon_ring)
+        if key != self._lesson_key:
+            self._lesson_key, self._lesson_since = key, level.elapsed
+        return 0.0 if level.in_beacon_ring else ease((level.elapsed-self._lesson_since-1.5)/.45)
+
+    def lesson_fonts(self, progress):
+        return BitmapFont(self.font.scale*(1-.10*progress)), BitmapFont(self.title_font.scale*(1-.10*progress))
+
+    def lesson_rect(self, level, width, height):
+        progress = self.lesson_progress(level)
+        font, title_font = self.lesson_fonts(progress)
+        panel_width = round(min(width-32, 900)*(1-.08*progress))
+        body = self.lines(level.instruction[1], panel_width-32, font)
+        panel_height = 24+title_font.size('A')[1]+len(body)*(font.size('A')[1]+4)
+        centre_top = height//2-panel_height//2
+        lower_top = self.hotbar_layout(width, height)[0].top-56-panel_height
+        top = round(centre_top+(lower_top-centre_top)*progress)
+        return pygame.Rect((width-panel_width)//2, top, panel_width, panel_height)
+
+    @staticmethod
+    def lesson_colours(elapsed):
+        # Keep the attention nudge on chill mode.
+        pulse = .5+.5*math.cos(math.tau*elapsed/2.4)
+        return (round(30+12*pulse), 23, 23, 236), (round(174+64*pulse), round(83+27*pulse), 90, 255)
+
+    def lesson_panel(self, surface, level, rect):
+        progress = self.lesson_progress(level)
+        font, title_font = self.lesson_fonts(progress)
+        background, border = self.lesson_colours(level.elapsed)
+        background = tuple(round(a+(b-a)*progress) for a, b in zip(background, (42, 36, 15, 236)))
+        border = tuple(round(a+(b-a)*progress) for a, b in zip(border, (248, 221, 122, 255)))
+        pygame.draw.rect(surface, background, rect, border_radius=9)
+        pygame.draw.rect(surface, border, rect, 3, border_radius=9)
+        title, instruction = level.instruction
+        heading = 'BEACON REACHED' if level.in_beacon_ring else f'{min(int(level.state)+1, 10)}/10  {title}'
+        self.text(surface, heading, rect.centerx, rect.y+8, (255, 218, 169), title_font, center=True)
+        self.wrapped(surface, instruction, rect.centerx, rect.y+16+title_font.size('A')[1], rect.width-32,
+                     (247, 241, 229), font, center=True)
 
     def draw(self, level, width, height, fps, paused=False):
         self._fonts(height, width)
@@ -480,15 +528,8 @@ class TutorialHUD:
         selection_center = int(width*.75 if coaching.slot < 5 else width*.25) if slot_coaching else width//2
         self.wrapped(overlay, selected, selection_center, selection_y+6, panel_width//2-24 if slot_coaching else panel_width-24,
                      (146, 227, 182), self.small_font, center=True)
-        title, instruction = level.instruction
-        body = self.lines(instruction, panel_width-32)
-        line_height = self.font.size('A')[1]+2
-        panel_height = 20+self.title_font.size('A')[1]+len(body)*line_height
-        panel_y = selection_y-panel_height-8
-        self.panel(overlay, ((width-panel_width)//2, panel_y, panel_width, panel_height))
-        self.text(overlay, f'{min(int(level.state)+1, 10)}/10  {title}', width//2, panel_y+8,
-                  (248, 221, 122), self.title_font, center=True)
-        self.wrapped(overlay, instruction, width//2, panel_y+14+self.title_font.size('A')[1], panel_width-32, center=True)
+        lesson = self.lesson_rect(level, width, height)
+        lesson_visible = level.active and not (paused or level.help_open or level.crafting_open)
         if slot_coaching:
             cell = cells[coaching.slot]
             pygame.draw.rect(overlay, (255, 229, 123), cell, 3, border_radius=9)
@@ -496,18 +537,21 @@ class TutorialHUD:
             x = max(16, min(width-text_width-16, cell.centerx-text_width//2))
             rect = pygame.Rect(x, selection_y, text_width, selection_height)
             self.coach(overlay, coaching.text, (cell.centerx, cell.top-2), rect)
-        elif coaching and coaching.kind in ('open', 'finish'):
-            pygame.draw.rect(overlay, (255, 229, 123), ((width-panel_width)//2, panel_y, panel_width, panel_height), 3, border_radius=9)
         if level.use_progress:
             pygame.draw.rect(overlay, (38, 59, 45), ((width-panel_width)//2+10, selection_y+selection_height-7, panel_width-20, 5))
             pygame.draw.rect(overlay, (124, 218, 182), ((width-panel_width)//2+10, selection_y+selection_height-7,
                             int((panel_width-20)*level.use_progress/USE_DURATION), 5))
 
         direction = None if paused else level.objective_direction()
-        direction_rect = self.direction_panel(overlay, direction) if direction else None
-        prompt_info = None if paused or level.help_open else self.prompt_rect(level, width, height, panel_y)
+        direction_rect = self.direction_panel(overlay, direction, lesson if lesson_visible else None) if direction else None
+        prompt_info = None if not lesson_visible or level.in_beacon_ring else self.prompt_rect(level, width, height, lesson.top)
         if prompt_info:
             prompt, rect, point = prompt_info
+            if rect.colliderect(lesson):
+                rect.top = lesson.bottom+10
+            aim = pygame.Rect(width//2-12, height//2-12, 24, 24)
+            if rect.colliderect(aim):
+                rect.left = width//2+18
             if direction_rect and rect.colliderect(direction_rect):
                 rect.x = min(width-rect.width-16, direction_rect.right+10)
             pygame.draw.line(overlay, (224, 215, 165), rect.midbottom, point, 1)
@@ -526,7 +570,9 @@ class TutorialHUD:
             for index, line in enumerate(lines):
                 self.text(overlay, line, rect.centerx, rect.y+6+index*(self.small_font.size('A')[1]+2),
                           (248, 221, 122), self.small_font, center=True)
-        if level.active and not level.crafting_open and not level.help_open and not paused:
+        if lesson_visible:
+            self.lesson_panel(overlay, level, lesson)
+        if lesson_visible and not lesson.collidepoint(width//2, height//2):
             pygame.draw.line(overlay, (241, 236, 211), (width//2-5, height//2), (width//2+5, height//2))
             pygame.draw.line(overlay, (241, 236, 211), (width//2, height//2-5), (width//2, height//2+5))
         if level.crafting_open:

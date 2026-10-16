@@ -39,7 +39,7 @@ def render_scene(renderer, level, batches):
     renderer.render_frame(camera, batches)
     for entity in level.entities.all():
         if entity.visible:
-            for mesh in entity.meshes:
+            for mesh in entity.render_meshes:
 
                 mx, my, mz = mesh.position
                 cy, sy = math.cos(entity.yaw), math.sin(entity.yaw)
@@ -71,16 +71,15 @@ def render_scene(renderer, level, batches):
         hand_camera.y = hand_camera.z = 0
         hand_camera.pivot_offset = 0
         gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
-        thrust = .25 * math.sin(level.attack_anim_timer/.22*math.pi)
         if held == 'spear':
-            meshes = level.weapon_meshes
+            meshes = models.pose_spear(level.weapon_meshes, level.attack_anim_timer)
         elif held == 'compass':
             relative, _, _ = level.compass_guidance()
             meshes = [*level.held_compass_meshes, models.pose_compass(level.compass_needle, relative)]
         else:
             meshes = level.held_props.get(held, ())
         for mesh in meshes:
-            renderer.render_mesh_dynamic(hand_camera, mesh, 0, 0, thrust if held == 'spear' else 0)
+            renderer.render_mesh_dynamic(hand_camera, mesh, 0, 0, 0)
 
 
 class Application:

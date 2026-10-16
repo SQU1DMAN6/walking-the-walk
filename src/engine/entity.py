@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import math
 from engine import models
 from engine.items import (DOG_SPEED, DOG_HEALTH, DOG_DAMAGE, DOG_RANGE,
-                          DOG_DETECTION, DOG_WINDUP, DOG_COOLDOWN)
+                          DOG_DETECTION, DOG_WINDUP, DOG_COOLDOWN, DOG_RECOVERY)
 
 
 @dataclass
@@ -23,6 +23,10 @@ class Entity:
 
     def distance_to(self, x, z):
         return math.hypot(x-self.x, z-self.z)
+
+    @property
+    def render_meshes(self):
+        return self.meshes
 
     @property
     def visual_height(self):
@@ -66,12 +70,20 @@ class Dog(Entity):
         self.windup = 0.0
         self.radius = .35
         self.speed = DOG_SPEED
+        self.attack_elapsed = DOG_WINDUP+DOG_RECOVERY
+        self.walk_phase = self.walk_blend = 0.0
+
+    @property
+    def render_meshes(self):
+        return models.pose_dog(self.meshes, self.attack_elapsed, self.walk_phase, self.walk_blend)
 
     def update(self, dt, camera, world):
 
         if self.health <= 0:
             self.state = 'defeated'
             return 0
+        self.attack_elapsed = min(DOG_WINDUP+DOG_RECOVERY, self.attack_elapsed+dt)
+        self.walk_blend *= math.exp(-dt*14)
         self.cooldown = max(0, self.cooldown-dt)
         distance = self.distance_to(camera.x, camera.z)
         if self.state == 'idle':
@@ -91,12 +103,18 @@ class Dog(Entity):
             if self.cooldown <= 0:
                 self.state = 'windup'
                 self.windup = DOG_WINDUP
+                self.attack_elapsed = 0.0
             return 0
         tx, tz = world.chase_target(self.x, self.z, camera.x, camera.z)
         dx, dz = tx-self.x, tz-self.z
         length = math.hypot(dx, dz)
         if length > 1e-6:
             step = min(self.speed*dt, length, max(0, distance-.8))
+            previous = self.x, self.z
             self.x, self.z = world.move(self.x, self.z, dx/length*step, dz/length*step, self.radius)
             self.y = world.height(self.x, self.z)
+            moved = math.dist(previous, (self.x, self.z))
+            self.walk_phase += moved*8
+            if moved > 1e-6:
+                self.walk_blend += 1-math.exp(-dt*14)
         return 0

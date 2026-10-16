@@ -2,6 +2,7 @@ import math
 import random
 from engine.mesh import Mesh, create_prism, create_pyramid
 from engine.worldgen import create_branch
+from engine.animation import dog_motion, spear_motion, rotate_point
 
 
 def lathe(profile, colour, sides=16):
@@ -75,19 +76,61 @@ def spear():
 
 
 def dog():
-
     fur, dark = (137, 91, 54), (69, 46, 32)
-    meshes = [create_prism(.52, .42, .90, fur, (0, .60, 0)),
-              create_prism(.40, .38, .38, fur, (0, .83, .55)),
-              create_prism(.25, .18, .32, (174, 126, 79), (0, .74, .82)),
-              create_prism(.19, .09, .04, dark, (0, .76, .995)),
-              create_branch((0, .68, -.40), (0, .95, -.85), .12, fur)]
+    parts = [('body', create_prism(.52, .42, .90, fur, (0, .60, 0))),
+             ('head', create_prism(.40, .38, .38, fur, (0, .83, .55))),
+             ('head', create_prism(.25, .12, .32, (174, 126, 79), (0, .78, .82))),
+             ('head', create_prism(.19, .09, .04, dark, (0, .80, .995))),
+             ('jaw', create_prism(.23, .08, .30, dark, (0, .66, .82))),
+             ('tail', create_branch((0, .68, -.40), (0, .95, -.85), .12, fur))]
     for x in (-.18, .18):
-        meshes.append(create_pyramid(.18, .30, .18, dark, (x, 1.12, .50)))
-        meshes.append(create_prism(.055, .055, .045, (20, 18, 16), (x, .88, .745)))
+        parts.append(('head', create_pyramid(.18, .30, .18, dark, (x, 1.12, .50))))
+        parts.append(('head', create_prism(.055, .055, .045, (20, 18, 16), (x, .88, .745))))
         for z in (-.30, .31):
-            meshes.append(create_prism(.12, .42, .14, dark, (x, .25, z)))
-    return meshes
+            parts.append(('leg', create_prism(.12, .42, .14, dark, (x, .25, z))))
+    for joint, mesh in parts:
+        mesh.joint = joint
+    return [mesh for _, mesh in parts]
+
+
+def pose_dog(meshes, time, walk_phase=0, walk_blend=0):
+    prepare, strike, jaw = dog_motion(time)
+    if not (prepare or strike or jaw) and walk_blend <= 1e-5:
+        return meshes
+    posed = []
+    for mesh in meshes:
+        vertices = []
+        for vertex in mesh.vertices:
+            point = tuple(a+b for a, b in zip(vertex, mesh.position))
+            if mesh.joint == 'jaw':
+                point = rotate_point(point, (0, .72, .61), pitch=jaw*.55)
+            if mesh.joint in ('head', 'jaw'):
+                point = rotate_point(point, (0, .82, .45), pitch=.12*prepare+.10*strike)
+            elif mesh.joint == 'leg':
+                x, _, z = mesh.position
+                diagonal = 1 if x*z > 0 else -1
+                angle = math.sin(walk_phase)*walk_blend*.35*diagonal
+                point = rotate_point(point, (x, .46, z), pitch=angle-.25*strike*(1 if z > 0 else -1))
+            elif mesh.joint == 'tail':
+                point = rotate_point(point, (0, .68, -.40), yaw=.12*math.sin(walk_phase)*walk_blend)
+            point = rotate_point(point, (0, .60, 0), pitch=.09*prepare-.08*strike)
+            x, y, z = point
+            vertices.append((x, y-.07*prepare+.06*strike, z-.10*prepare+.32*strike))
+        posed.append(Mesh(vertices, mesh.faces, mesh.colour, (0, 0, 0), vertex_colours=mesh.vertex_colours))
+    return posed
+
+
+def pose_spear(meshes, remaining):
+    dx, dy, dz, pitch, yaw = spear_motion(remaining)
+    posed = []
+    for mesh in meshes:
+        vertices = []
+        for vertex in mesh.vertices:
+            point = tuple(a+b for a, b in zip(vertex, mesh.position))
+            x, y, z = rotate_point(point, (.33, -.40, .45), pitch, yaw)
+            vertices.append((x+dx, y+dy, z+dz))
+        posed.append(Mesh(vertices, mesh.faces, mesh.colour, (0, 0, 0), vertex_colours=mesh.vertex_colours))
+    return posed
 
 
 def beacon():
