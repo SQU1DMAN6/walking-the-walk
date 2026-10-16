@@ -137,7 +137,7 @@ class Level1:
         elif self.state == Stage.MATERIALS and self.inventory.selected_item != 'compass':
             text = 'Press [{compass_slot}] to equip Compass. Follow arrows and use [F] to pick up sticks and rock.'
         elif self.in_beacon_ring:
-            text = 'You\'re nside the ring. Press [F] to finish the tutorial.'
+            text = 'You\'re inside the ring. Press [F] to finish the tutorial.'
         elif self.state == Stage.BEACON and self.inventory.selected_item == 'compass':
             text = 'Follow the red needle along the path. Press [F] once you\'re inside the turquoise ring.'
         elif self.state == Stage.COMBAT:
