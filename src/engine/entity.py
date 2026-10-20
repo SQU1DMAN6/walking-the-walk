@@ -3,6 +3,7 @@ import math
 from engine import models
 from engine.items import (DOG_SPEED, DOG_HEALTH, DOG_DAMAGE, DOG_RANGE,
                           DOG_DETECTION, DOG_WINDUP, DOG_COOLDOWN, DOG_RECOVERY)
+from engine.run_config import SPIDER
 
 
 @dataclass
@@ -62,15 +63,24 @@ class EntityManager:
 
 
 class Dog(Entity):
+    max_health = DOG_HEALTH
+    damage = DOG_DAMAGE
+    reach = DOG_RANGE
+    detection = DOG_DETECTION
+    windup_duration = DOG_WINDUP
+    recovery = DOG_RECOVERY
+    attack_cooldown = DOG_COOLDOWN
+    default_speed = DOG_SPEED
+
     def __init__(self, position):
         super().__init__('dog', *position, meshes=models.dog())
-        self.health = DOG_HEALTH
+        self.health = self.max_health
         self.state = 'idle'
         self.cooldown = 0.0
         self.windup = 0.0
         self.radius = .35
-        self.speed = DOG_SPEED
-        self.attack_elapsed = DOG_WINDUP+DOG_RECOVERY
+        self.speed = self.default_speed
+        self.attack_elapsed = self.windup_duration+self.recovery
         self.walk_phase = self.walk_blend = 0.0
 
     @property
@@ -82,12 +92,12 @@ class Dog(Entity):
         if self.health <= 0:
             self.state = 'defeated'
             return 0
-        self.attack_elapsed = min(DOG_WINDUP+DOG_RECOVERY, self.attack_elapsed+dt)
+        self.attack_elapsed = min(self.windup_duration+self.recovery, self.attack_elapsed+dt)
         self.walk_blend *= math.exp(-dt*14)
         self.cooldown = max(0, self.cooldown-dt)
         distance = self.distance_to(camera.x, camera.z)
         if self.state == 'idle':
-            if distance > DOG_DETECTION:
+            if distance > self.detection:
                 return 0
             self.state = 'chase'
         self.yaw = math.atan2(camera.x-self.x, camera.z-self.z)
@@ -95,14 +105,14 @@ class Dog(Entity):
             self.windup -= dt
             if self.windup <= 0:
                 self.state = 'chase'
-                self.cooldown = DOG_COOLDOWN
-                if distance <= DOG_RANGE and world.line_clear(self.x, self.z, camera.x, camera.z, .1):
-                    return DOG_DAMAGE
+                self.cooldown = self.attack_cooldown if self.kind == 'dog' else self.attack_cooldown-self.windup_duration
+                if distance <= self.reach and world.line_clear(self.x, self.z, camera.x, camera.z, .1):
+                    return self.damage
             return 0
-        if distance <= DOG_RANGE:
+        if distance <= self.reach:
             if self.cooldown <= 0:
                 self.state = 'windup'
-                self.windup = DOG_WINDUP
+                self.windup = self.windup_duration
                 self.attack_elapsed = 0.0
             return 0
         tx, tz = world.chase_target(self.x, self.z, camera.x, camera.z)
@@ -118,3 +128,22 @@ class Dog(Entity):
             if moved > 1e-6:
                 self.walk_blend += 1-math.exp(-dt*14)
         return 0
+
+
+class Spider(Dog):
+    max_health = SPIDER['health']
+    damage = SPIDER['damage']
+    reach = SPIDER['range']
+    detection = SPIDER['detection']
+    windup_duration = SPIDER['windup']
+    recovery = SPIDER['recovery']
+    attack_cooldown = SPIDER['cooldown']
+    default_speed = SPIDER['speed']
+
+    def __init__(self, position):
+        super().__init__(position)
+        self.kind, self.meshes, self.radius = 'spider', models.spider(), .45
+
+    @property
+    def render_meshes(self):
+        return models.pose_spider(self.meshes, self.walk_phase, self.walk_blend, self.attack_elapsed)

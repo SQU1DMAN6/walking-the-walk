@@ -6,6 +6,7 @@ from engine.menu import Screen, TITLE_BUTTONS, ABOUT_TEXT
 from engine.prompts import project
 from engine.level1 import Stage
 from engine.animation import ease
+from engine.run_config import DIFFICULTIES, LENGTHS
 
 
 class BitmapFont:
@@ -291,7 +292,7 @@ class TutorialHUD:
             self.text(surface, 'Walking the Walk', width//2, int(height*.16), (248, 221, 122), self.logo_font, center=True)
             self.text(surface, 'Written by Quan Thai', width//2, int(height*.16)+self.logo_font.size('A')[1]+18,
                       font=self.font, center=True)
-            self.text(surface, 'Version 0', width//2, int(height*.16)+self.logo_font.size('A')[1]+50,
+            self.text(surface, 'Version 1', width//2, int(height*.16)+self.logo_font.size('A')[1]+50,
                       font=self.font, center=True)
             for index, (label, button) in enumerate(zip(TITLE_BUTTONS, buttons)):
                 self.button(surface, button, label, index == menu.selected)
@@ -303,11 +304,23 @@ class TutorialHUD:
                           (248, 221, 122), self.small_font, center=True)
             self.text(surface, 'Click a button | [Up/Down] choose | [Enter] open | [Esc] quit', width//2, height-42,
                       font=self.small_font, center=True)
+        elif menu.screen == Screen.PLAY:
+            self.text(surface, 'CONFIGURE YOUR RUN', width//2, 35, (248, 221, 122), self.title_font, True)
+            groups, start = menu.config_layout(width, height)
+            for row, (heading, options, rects, selected) in enumerate(zip(
+                    ('Difficulty', 'World length'), (DIFFICULTIES, LENGTHS), groups,
+                    (menu.config.difficulty, menu.config.length))):
+                self.text(surface, heading, width//2, rects[0].top-31, font=self.font, center=True)
+                for choice, rect in zip(options, rects):
+                    self.button(surface, rect, choice, choice == selected)
+            self.button(surface, start, 'Start run [Enter]', menu.config_row == 2)
+            self.button(surface, back, 'Back to title [Esc]')
+            self.text(surface, '[Up/Down] row | [Left/Right] choose', width//2,
+                      height-self.small_font.size('A')[1]-6, font=self.small_font, center=True)
         else:
             panel = pygame.Rect(24, int(height*.18), width-48, int(height*.52))
             self.panel(surface, panel)
             title, message = {
-                Screen.PLAY: ('PLAY', "The main gameplay loop isn't done yet. Tutorial is ready to go."),
                 Screen.ABOUT: ('ABOUT THIS GAME', ABOUT_TEXT),
                 Screen.LOADING: ('HEADING INTO CS JUNGLE', 'Getting the forest ready. Hang tight.'),
             }[menu.screen]

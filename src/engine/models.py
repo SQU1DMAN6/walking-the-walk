@@ -178,3 +178,77 @@ def pose_compass(mesh, yaw=0):
 
 
 RESOURCE_MODELS = {"can": food_can, "bottle": plastic_bottle, "stick": stick, "rock": rock}
+
+
+def axe():
+    return [create_branch((.45, -.55, .65), (.45, -.15, 1.55), .08, (133, 93, 50)),
+            create_prism(.48, .27, .13, (154, 166, 167), (.30, -.12, 1.55)),
+            create_prism(.10, .31, .15, (209, 216, 206), (.02, -.12, 1.55))]
+
+
+def pose_axe(meshes, remaining):
+    from engine.animation import envelope
+    motion = envelope(.45-max(0, remaining), 0, .18, .45)
+    posed = []
+    for mesh in meshes:
+        points = [rotate_point(tuple(a+b for a, b in zip(v, mesh.position)), (.45, -.55, .65),
+                               pitch=motion*.7, yaw=-motion*.45) for v in mesh.vertices]
+        posed.append(Mesh(points, mesh.faces, mesh.colour, (0, 0, motion*.15)))
+    return posed
+
+
+def leaves():
+    return [Mesh([(-.25, .08, 0), (0, .16, -.25), (.25, .08, 0), (0, .06, .25)],
+                 [(0, 1, 2), (0, 2, 3)], (101, 179, 84), (0, 0, 0))]
+
+
+def bandage():
+    return [create_prism(.30, .17, .23, (222, 218, 186), (0, .10, 0)),
+            create_prism(.08, .015, .24, (137, 164, 119), (0, .19, 0))]
+
+
+def skull_sign():
+    meshes = [create_prism(.10, 1.45, .10, (124, 85, 50), (0, .72, 0)),
+              create_prism(.78, .64, .09, (53, 38, 28), (0, 1.3, 0)),
+              create_prism(.35, .33, .045, (235, 226, 197), (0, 1.35, .065)),
+              create_prism(.22, .14, .045, (235, 226, 197), (0, 1.13, .065))]
+    for x in (-.09, .09):
+        meshes.append(create_prism(.08, .09, .025, (25, 25, 20), (x, 1.36, .10)))
+    meshes.append(create_prism(.055, .055, .025, (25, 25, 20), (0, 1.24, .10)))
+    for x in (-.06, 0, .06):
+        meshes.append(create_prism(.018, .08, .025, (53, 38, 28), (x, 1.10, .10)))
+    return meshes
+
+
+def spider():
+    meshes = [lathe([(-.22, .05), (0, .48), (.22, .25), (.26, 0)], (66, 46, 40), 12),
+              create_prism(.46, .25, .48, (83, 55, 42), (0, .44, .36))]
+    meshes[0].position = (0, .46, -.25)
+    for side in (-1, 1):
+        for i in range(4):
+            hip = (side*.20, .42, .38-i*.20)
+            knee = (side*(.85+.12*math.sin(i)), .65, .8-i*.48)
+            foot = (side*1.18, .06, 1.0-i*.60)
+            for a, b in ((hip, knee), (knee, foot)):
+                mesh = create_branch(a, b, .085, (56, 41, 34))
+                mesh.leg = (side, i, hip)
+                meshes.append(mesh)
+        meshes.append(create_prism(.07, .055, .045, (200, 60, 39), (side*.12, .53, .615)))
+    return meshes
+
+
+def pose_spider(meshes, phase, moving, attack_time):
+    from engine.animation import envelope
+    lunge = envelope(attack_time, .07, .18, .40)
+    posed = []
+    for mesh in meshes:
+        points = []
+        for vertex in mesh.vertices:
+            point = tuple(a+b for a, b in zip(vertex, mesh.position))
+            if hasattr(mesh, 'leg'):
+                side, index, hip = mesh.leg
+                point = rotate_point(point, hip, yaw=math.sin(phase+index*math.pi/2)*moving*.20*side)
+            x, y, z = point
+            points.append((x, y+.05*lunge, z+.25*lunge))
+        posed.append(Mesh(points, mesh.faces, mesh.colour, (0, 0, 0)))
+    return posed

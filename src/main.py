@@ -15,6 +15,8 @@ from engine.input import PointerCapture
 from engine.items import RECIPE_ORDER
 from engine import models
 from engine.menu import MenuFlow, Screen
+from engine.survival import SurvivalRun
+from engine.survival_ui import SurvivalHUD
 
 
 SKY_COLOUR = (.36, .65, .88)
@@ -73,6 +75,8 @@ def render_scene(renderer, level, batches):
         gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
         if held == 'spear':
             meshes = models.pose_spear(level.weapon_meshes, level.attack_anim_timer)
+        elif held == 'axe':
+            meshes = models.pose_axe(level.axe_meshes, level.attack_anim_timer)
         elif held == 'compass':
             relative, _, _ = level.compass_guidance()
             meshes = [*level.held_compass_meshes, models.pose_compass(level.compass_needle, relative)]
@@ -93,6 +97,8 @@ class Application:
         self.batches = []
         self.executor = self.loading_future = None
         self.loading_visible = False
+        self.loading_signature = None
+        self.render_revision = 0
         self.paused = False
         self.running = True
 
@@ -102,7 +108,20 @@ class Application:
             self.level.cancel_use()
             self.level.camera.grab_active = False
         self.paused = False
+        if self.level and getattr(self.level, 'is_survival', False):
+            self.release_world()
         self.menu.back()
+
+    def release_world(self):
+        if self.batches:
+            gl.glDeleteBuffers(len(self.batches), [batch.vbo for batch in self.batches])
+        if self.renderer:
+            self.renderer.close()
+        self.level, self.renderer, self.batches = None, None, []
+
+    def configure_next_run(self):
+        self.return_to_title()
+        self.menu.activate(0)
 
     def handle_event(self, event):
         if event.type == pygame.QUIT:
@@ -121,11 +140,12 @@ class Application:
             if self.level:
                 self.level.cancel_use()
         elif event.type == pygame.WINDOWFOCUSLOST and not self.smoke_test:
-            if self.menu.screen == Screen.TUTORIAL:
+            if self.menu.screen in (Screen.TUTORIAL, Screen.RUN):
                 self.paused = True
                 self.level.cancel_use()
             self.pointer.set_active(False)
-        elif self.menu.screen != Screen.TUTORIAL:
+        elif self.menu.screen not in (Screen.TUTORIAL, Screen.RUN):
+            previous = self.menu.screen
             if self.menu.screen == Screen.TITLE and not self.hud._intro_finished:
                 if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
                     # Skip the intro. Hidden buttons don't get a side quest.
@@ -145,10 +165,20 @@ class Application:
                     if rect.collidepoint(event.pos):
                         self.hud.press_button(rect)
                 self.menu.mouse(event.pos, self.width, self.height, clicked=True)
+            cached_tutorial = self.level and not self.menu.run_requested and not getattr(self.level, 'is_survival', False)
+            if self.menu.screen == Screen.LOADING and previous != Screen.LOADING and not cached_tutorial:
+                self.loading_visible = False
         elif event.type == pygame.KEYDOWN:
             level = self.level
             if event.key == pygame.K_h:
-                level.help_open = not level.help_open
+                if getattr(level, 'is_survival', False):
+                    if level.help_open:
+                        level.help_open = False
+                    else:
+                        self.paused = not self.paused
+                        level.crafting_open = False
+                else:
+                    level.help_open = not level.help_open
                 level.cancel_use()
                 self.pointer.set_active(False)
             elif event.key == pygame.K_ESCAPE:
@@ -167,7 +197,10 @@ class Application:
             elif event.key == pygame.K_RETURN and self.paused and level.active:
                 self.paused = False
             elif event.key == pygame.K_r and not level.active:
-                level.reset()
+                if getattr(level, 'is_survival', False):
+                    self.configure_next_run()
+                else:
+                    level.reset()
                 self.paused = False
             elif level.active and not self.paused:
                 if event.key == pygame.K_c:
@@ -176,11 +209,13 @@ class Application:
                 elif level.crafting_open:
                     if event.key in (pygame.K_UP, pygame.K_DOWN):
                         offset = -1 if event.key == pygame.K_UP else 1
-                        level.selected_recipe = (level.selected_recipe+offset) % len(RECIPE_ORDER)
+                        level.selected_recipe = (level.selected_recipe+offset) % len(getattr(level, 'recipes', RECIPE_ORDER))
                     elif event.key == pygame.K_RETURN:
                         level.craft()
                 elif event.key == pygame.K_f:
                     level.handle_interaction()
+                elif event.key == pygame.K_g and getattr(level, 'is_survival', False):
+                    level.drop_selected()
                 elif pygame.K_0 <= event.key <= pygame.K_9:
                     level.select_slot(event.key-pygame.K_0)
         elif event.type == pygame.MOUSEMOTION:
@@ -193,8 +228,13 @@ class Application:
                 if action == 'resume':
                     self.paused = False
                 elif action == 'restart':
-                    self.level.reset()
+                    if getattr(self.level, 'is_survival', False):
+                        self.configure_next_run()
+                    else:
+                        self.level.reset()
                     self.paused = False
+                elif action == 'controls':
+                    self.level.help_open = True
                 elif action == 'title':
                     self.return_to_title()
                 elif action == 'quit':
@@ -207,15 +247,23 @@ class Application:
     def update(self, dt):
         self.menu.elapsed += dt
         if self.menu.screen == Screen.LOADING and self.loading_visible and not self.menu.error:
-            if self.level:
+            if self.level and not self.menu.run_requested and not getattr(self.level, 'is_survival', False):
                 self.level.reset()
                 self.menu.screen = Screen.TUTORIAL
             else:
+                signature = (self.menu.run_requested, self.seed, self.menu.config)
+                if self.loading_future is not None and self.loading_signature != signature:
+                    self.loading_future.cancel()
+                    self.loading_future = None
                 if self.loading_future is None:
+                    if self.level:
+                        self.release_world()
                     if self.executor is None:
                         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='jungle')
                     # Build the forest off-thread; OpenGL stays on the window thread.
-                    self.loading_future = self.executor.submit(Level1, Camera(), self.seed)
+                    self.loading_signature = signature
+                    self.loading_future = (self.executor.submit(SurvivalRun, Camera(), self.seed, self.menu.config)
+                                           if self.menu.run_requested else self.executor.submit(Level1, Camera(), self.seed))
                 if self.loading_future.done():
                     try:
                         level = self.loading_future.result()
@@ -225,18 +273,23 @@ class Application:
                         self.renderer.fog_near, self.renderer.fog_far = 24, 68
                         self.batches = build_batches(level.world.meshes)
                         self.level = level
-                        self.menu.screen = Screen.TUTORIAL
-                        print(json.dumps({'event': 'tutorial_ready', 'seed': self.seed,
+                        is_run = getattr(level, 'is_survival', False)
+                        self.hud.close()
+                        self.hud = SurvivalHUD() if is_run else TutorialHUD()
+                        self.hud._intro_finished = True
+                        self.menu.screen = Screen.RUN if is_run else Screen.TUTORIAL
+                        self.render_revision = getattr(level.world, 'render_revision', 0)
+                        print(json.dumps({'event': 'run_ready' if is_run else 'tutorial_ready', 'seed': self.seed,
                                           'validation': level.world.validation, 'batches': len(self.batches)}), flush=True)
                     except Exception as error:
                         if self.renderer:
                             self.renderer.close()
                             self.renderer = None
-                        self.menu.error = "Couldn't load Tutorial. Head back and try again."
+                        self.menu.error = "Couldn't load the jungle. Head back and try again."
                         print(json.dumps({'event': 'load_error', 'error': str(error)}), flush=True)
                     self.loading_future = None
         level = self.level
-        playing = self.menu.screen == Screen.TUTORIAL
+        playing = self.menu.screen in (Screen.TUTORIAL, Screen.RUN)
         should_capture = playing and level.active and not self.paused and not level.crafting_open and not level.help_open and not self.smoke_test
         self.pointer.set_active(should_capture)
         if level:
@@ -249,7 +302,14 @@ class Application:
             level.update(dt)
 
     def render(self, fps=0):
-        if self.menu.screen == Screen.TUTORIAL:
+        if self.menu.screen in (Screen.TUTORIAL, Screen.RUN):
+            revision = getattr(self.level.world, 'render_revision', 0)
+            if revision != self.render_revision:
+                old = self.batches
+                self.batches = build_batches(self.level.world.meshes)
+                if old:
+                    gl.glDeleteBuffers(len(old), [batch.vbo for batch in old])
+                self.render_revision = revision
             render_scene(self.renderer, self.level, self.batches)
             self.hud.draw(self.level, self.width, self.height, fps, paused=self.paused)
         else:

@@ -2,11 +2,11 @@
 
 ### Written by Quan Thai
 
-### Current release: Version 0.5
+### Current release: Version 1
 
-A first-person survival and navigation tutorial set in **CS Jungle**. Follow winding forest paths, scavenge a can and bottle, recover your health, turn their scrap into a compass, gather a spear's materials, survive a hostile dog, and find the end beacon. At least... that's the tutorial level.
+A first-person exploration and PvE survival game set in **CS Jungle**. Navigate winding rainforest paths, scavenge materials, craft equipment, survive dogs and giant spiders, and activate the northern end beacon. Skull signs warn of dangerous shortcuts; longer detours offer fewer encounters. An axe can open alternative routes through trees.
 
-The world is one deterministic, bounded jungle chunk. Procedural trees surround a carved-out route; generation verifies clearance after placing vegetation. The existing OpenGL engine renders terrain, forest, recognisable resource models, world-attached objective arrows, and the beacon's turquoise ring.
+**Play** opens configuration: Easy, Medium or Hard, and Short, Normal or Long. Choose with the mouse or Up/Down and Left/Right, then select Start run. Generation happens behind a loading screen and verifies a connected route before play. Every run starts with full health/stamina, an empty inventory and fresh world state. The **Tutorial** remains a separate guided level. About retains the project's authored information.
 
 ## Run
 
@@ -19,41 +19,40 @@ python src/main.py
 
 In future, pre-build binaries targeting Windows and Linux will be made and deployed with each release.
 
-The game starts fullscreen at the desktop resolution. Want a window? Run `wtw-venv/bin/python src/main.py --windowed`; `--width` and `--height` flags set its initial size (1280×800 by default). Choose another reproducible world with `--seed <seed>`.
+The game starts fullscreen. Use `--windowed --width 1280 --height 800` for a window, and `--seed <seed>` for a reproducible world. The publisher intro can be skipped with a key or click. Esc quits from the title.
 
-The publisher intro has a visible skip hint: press any key or click to continue to the title. The title has **Play**, **Tutorial**, and **About This Game**. Play opens a temporary panel saying the main gameplay loop is still in progress. Tutorial loads CS Jungle with a spinner while the forest is generated. About contains the game information in `src/engine/menu.py`. Click a button or use Up/Down and Enter. Esc goes back from these panels and quits from the title.
-
-| Control | Action |
+| Main-game control | Action |
 | --- | --- |
 | WASD / mouse | Walk / look |
 | Shift | Sprint |
-| F | Collect the relevant resource or activate the beacon |
-| 1–9 | Select one of nine inventory slots |
-| 0 | Empty hand |
-| Hold E | Use the selected food or water for one second; release between items |
-| C | Open/close crafting; choose a recipe and check its materials |
-| Up / Down, Enter | Select a recipe, then craft (clicking also works) |
-| Left click | Thrust while holding the spear |
-| Esc | Close crafting, or pause and release the pointer; press again while paused to return to title |
-| H | Open/close the control reference; Esc also closes it |
-| Resume button / Enter while paused | Resume |
-| R after death or completion | Restart |
-| Ctrl+Q | Quit |
+| F | Collect, read a sign, chop with a held axe, or activate the beacon |
+| 1–9 / 0 | Select inventory slot / empty hand |
+| Hold E | Use selected food, water or bandage; release between uses |
+| C | Open/close crafting |
+| Up/Down, Enter | Choose recipe, craft; clicking also works |
+| Left click | Swing the held spear or axe, including in empty space |
+| G | Drop the selected stack; recover it with F |
+| H | Pause with controls and Resume/Menu/Exit options |
+| Esc | Close a panel, pause, or return to title while paused |
+| Enter while paused | Resume |
+| R after death/completion | Configure another run |
+| Ctrl+Q | Exit |
 
-The tutorial starts at 80/100 health. Each consumable heals 10 up to 100. Collection gives just the can or bottle, each in its own slot. Holding E to finish it replaces that same slot with metal or plastic scrap; scrap appears only after consumption. A compass costs **1 metal scrap + 1 plastic scrap**; a spear costs **2 sticks + 1 rock**. Crafting shows material counts and pauses the encounter while you choose. Pick a tool's number slot to hold it. Later interactions and the dog encounter are gated by tutorial progression. The beacon requires F, not just proximity.
+Nine inventory slots show quantities, item names and the selected item's type/action. Pick up cans and bottles to receive food/water **and their scrap immediately** in the main game. Food and water heal ten; bandages roll 20–35 healing once per completed use, capped at maximum health. Full-health use does not waste supplies. Dropped stacks remain recoverable and do not generate extra scrap.
 
-Nearby targets show one floating action prompt. The prompt checks the real interaction range, equipped spear, aim and attack cooldown. Selecting a slot confirms its item and shows its name, count and available action above the inventory bar. Full inventory, unavailable use, cooldown and low stamina have short explanations. Extra consumables stay in your pack when health is full; the two required tutorial containers can still be opened for scrap to keep progression possible.
+| Recipe | Ingredients |
+| --- | --- |
+| Compass | 1 metal scrap + 1 plastic scrap |
+| Stone spear | 2 sticks + 1 stone |
+| Stone axe | 4 sticks + 5 stone |
+| Bandage | 3 leaves |
 
-Each new lesson appears at screen centre with a slow red pulse for 1.5 seconds, then slides down over 0.45 seconds into a slightly smaller yellow reminder above the inventory. Inside the beacon ring, the F finish instruction sits at screen centre and remains visible in every look direction. Press H whenever you need the reference. Pause, game-over and completion screens have working Resume/Restart, Title and Quit buttons. Health changes briefly highlight the health panel, and notifications expire automatically.
+Stone uses the existing `rock` inventory item. Decorative pebbles are smaller and cannot be collected. Three in-range axe chops remove a tree, update collision and drop three leaves. The guaranteed route is traversable without an axe. Recipes, weapon parameters and difficulty settings are defined in `run_recipes.py`, `run_config.py` and `items.py`.
 
-A direction arrow names the next required resource, follows the connected paths back from branches, and flags the hostile dog. Contextual arrows highlight the actual equipment slot and the next crafting action, including a clickable Close button. Inside the beacon ring, the F finish instruction stays visible even when looking away. Beacon direction guidance requires holding the compass.
+Hold the compass's numbered slot to see its dial and red needle pointing towards the beacon. It shows the destination, leaving route choice to the player. Play has no tutorial objective arrows or lessons; its persistent H hint opens controls. Pause/crafting stops the encounter and run timer. Death and completion show distinct results, with new-run/menu/exit options. Returning to the title discards the run.
 
-Hold the compass slot to see its dial and red needle pointing toward the beacon relative to your view. Keep to the winding path. Bushes are scenery you can walk through; trees and the world boundary still stop you. Tutorial instructions sit near screen centre, under a blue sky.
+Tutorial retains its established sequence and balances: 80 starting health, food/water replaced by scrap after consumption, guided resource/equipment steps and the centred-then-yellow lesson panel. H opens its control reference. Mouse-look still uses SDL relative capture with stale motion flushed on focus changes. Blue sky, pass-through bushes and collision with trees/world bounds remain.
 
-The spear eases through preparation, thrust and recovery; each click can land another hit after 0.38 seconds. The dog crouches, opens its jaw, lunges and recovers, with animated legs while chasing. Its 0.45-second bite warning gives time to back away, followed by a 0.65-second cooldown. The spear still reaches farther and the player still moves faster than the dog.
+Run `bash tests/run_v1_checks.sh` for tutorial regressions, v1 tests, the configuration/seed matrix, survival simulations and OpenGL captures. Every execution has a ten-second timeout. Tests use SDL offscreen by default; desktop input feel and subjective difficulty remain playtest checks. See the [v1 change report](doc/IMPLEMENTATION-v1-2026_10_20.md) and [requirement audit](doc/SPEC-COMPLIANCE-v1-2026_10_20.md).
 
-Mouse-look uses SDL relative motion, with stale input flushed when capture changes. Opening crafting, pausing, or losing focus releases the pointer; returning to play briefly discards capture-transition motion.
-
-That's all for now.
-
-_Walking the Walk, Version 0.5, Written by Quan Thai, October 2026_
+_Walking the Walk, Version 1, Written by Quan Thai, October 2026_

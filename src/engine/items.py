@@ -1,3 +1,6 @@
+from engine.run_recipes import EXTRA_RECIPES
+
+
 ITEMS = {
     "food": ("Canned food", "Consumable", 1),
     "water": ("Bottled water", "Consumable", 1),
@@ -7,6 +10,9 @@ ITEMS = {
     "rock": ("Rock", "Material", 20),
     "compass": ("Compass", "Tool", 1),
     "spear": ("Stone spear", "Weapon", 1),
+    "axe": ("Stone axe", "Weapon", 1),
+    "leaves": ("Leaves", "Material", 20),
+    "bandage": ("Bandage", "Consumable", 10),
 }
 RECIPES = {
     "compass": {"name": "Compass", "materials": {"metal_scrap": 1, "plastic_scrap": 1},
@@ -14,7 +20,9 @@ RECIPES = {
     "spear": {"name": "Stone spear", "materials": {"stick": 2, "rock": 1},
               "output": "spear", "quantity": 1},
 }
+RECIPES.update(EXTRA_RECIPES)
 RECIPE_ORDER = ["compass", "spear"]
+RUN_RECIPE_ORDER = ["compass", "spear", "axe", "bandage"]
 RESOURCE_LOOT = {
     "can": {"food": 1},
     "bottle": {"water": 1},

@@ -43,9 +43,9 @@ INTERACTION_RANGE = 2.2
 
 
 class Level1:
-    def __init__(self, camera, seed=67):
+    def __init__(self, camera, seed=67, world=None):
         self.camera = camera
-        self.world = TutorialChunk(seed)
+        self.world = world if world is not None else TutorialChunk(seed)
         self.path_guide = PathGuide(self.world.paths)
         self.arrow_meshes = create_arrow()
         self.ring_mesh = create_ring(self.world.beacon, self.world.height)
