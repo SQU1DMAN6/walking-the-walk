@@ -45,6 +45,7 @@ class Camera:
 
         self.sprinting = False
         self.sprint_blocked = False
+        self.survival_stamina = False
 
 
     def forward_vec(self):
@@ -130,6 +131,8 @@ class Camera:
         if sprinting:
             drain_factor = 0.5 + 0.5 * (1.0 - self.stamina / self.max_stamina)
             self.stamina = max(0.0, self.stamina - 12.0 * dt * (0.7 + 0.3 * drain_factor))
+        elif self.survival_stamina:
+            self.stamina = min(self.max_stamina,self.stamina+(8 if n>0 else 25)*dt)
         elif n > 0.0 and self.stamina < 20.0:
 
             self.stamina = max(0.0, self.stamina - 1.0 * dt)
@@ -141,7 +144,7 @@ class Camera:
 
         if sprinting:
             speed = self.move_speed * self.sprint_factor
-        elif self.exhausted:
+        elif self.exhausted and not self.survival_stamina:
             speed = self.move_speed * 1.15
         else:
             speed = self.move_speed

@@ -25,6 +25,25 @@ class Mesh:
         self._vertex_count = 0
 
 
+class MeshPose:
+    def __init__(self,source,rotations=(),translation=(0,0,0)):
+        self.source,self.rotations,self.translation = source,rotations,translation
+        self.position = (0,0,0)
+        self.faces,self.colour = source.faces,source.colour
+        self.texcoords,self.vertex_colours,self.alpha = source.texcoords,source.vertex_colours,source.alpha
+
+    @property
+    def vertices(self):
+        from engine.animation import rotate_point
+        result = []
+        for vertex in self.source.vertices:
+            point = tuple(a+b for a,b in zip(vertex,self.source.position))
+            for pivot,pitch,yaw in self.rotations:
+                point = rotate_point(point,pivot,pitch,yaw)
+            result.append(tuple(a+b for a,b in zip(point,self.translation)))
+        return result
+
+
 def create_prism(
         width,
         height,

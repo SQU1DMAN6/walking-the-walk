@@ -1,5 +1,6 @@
 import math
 import random
+from bisect import bisect_left
 
 
 def segment_distance(x, z, a, b):
@@ -55,12 +56,10 @@ class PathNetwork:
 
     def at(self, distance):
         distance = max(0, min(self.lengths[-1], distance))
-        for i in range(1, len(self.lengths)):
-            if distance <= self.lengths[i]:
-                t = (distance - self.lengths[i-1]) / (self.lengths[i] - self.lengths[i-1])
-                a, b = self.route[i-1:i+1]
-                return (a[0] + t*(b[0]-a[0]), a[1] + t*(b[1]-a[1]))
-        return self.route[-1]
+        i = max(1, min(len(self.lengths)-1, bisect_left(self.lengths, distance)))
+        t = (distance-self.lengths[i-1])/(self.lengths[i]-self.lengths[i-1])
+        a, b = self.route[i-1:i+1]
+        return a[0]+t*(b[0]-a[0]), a[1]+t*(b[1]-a[1])
 
     def nearest_route_index(self, x, z):
         return min(range(len(self.route)), key=lambda i: math.hypot(x-self.route[i][0], z-self.route[i][1]))

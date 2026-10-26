@@ -10,8 +10,8 @@ except Exception:
 import ctypes
 import math
 import random
+import numpy as np
 
-from engine.vector import Vec3
 
 
 def _generate_leaf_texture(size=64):
@@ -83,114 +83,6 @@ def _generate_leaf_texture(size=64):
     return tex_id
 
 
-def _face_normal(v0, v1, v2):
-
-    ux = v1[0] - v0[0]
-    uy = v1[1] - v0[1]
-    uz = v1[2] - v0[2]
-    wx = v2[0] - v0[0]
-    wy = v2[1] - v0[1]
-    wz = v2[2] - v0[2]
-    nx = uy * wz - uz * wy
-    ny = uz * wx - ux * wz
-    nz = ux * wy - uy * wx
-    nl = math.sqrt(nx * nx + ny * ny + nz * nz)
-    if nl < 1e-9:
-        return (0.0, 1.0, 0.0)
-    return (nx / nl, ny / nl, nz / nl)
-
-
-def _build_vertex_data(mesh):
-
-
-    if mesh._vertex_data is not None:
-        return mesh._vertex_data, mesh._vertex_count
-
-    data = []
-    for face in mesh.faces:
-        i0, i1, i2 = face
-        n = _face_normal(mesh.vertices[i0], mesh.vertices[i1], mesh.vertices[i2])
-        for idx in face:
-            vx, vy, vz = mesh.vertices[idx]
-            wx = vx + mesh.position[0]
-            wy = vy + mesh.position[1]
-            wz = vz + mesh.position[2]
-            data.extend([wx, wy, wz, n[0], n[1], n[2]])
-            if mesh.texcoords:
-                data.extend(mesh.texcoords[idx])
-            else:
-                data.extend([0.0, 0.0])
-
-            if mesh.vertex_colours is not None:
-                c = mesh.vertex_colours[idx]
-                data.extend([c[0], c[1], c[2]])
-            else:
-                data.extend([mesh.colour[0], mesh.colour[1], mesh.colour[2]])
-
-    mesh._vertex_data = data
-    mesh._vertex_count = len(data) // 11
-    return mesh._vertex_data, mesh._vertex_count
-
-
-def _mesh_bake(mesh):
-
-
-    cache = getattr(mesh, '_bake_cache', None)
-    if cache is not None:
-        return cache
-
-    verts = []
-    norms = []
-    uvs = []
-    cols = []
-    for face in mesh.faces:
-        i0, i1, i2 = face
-        n = _face_normal(mesh.vertices[i0], mesh.vertices[i1], mesh.vertices[i2])
-        for idx in face:
-            verts.extend(mesh.vertices[idx])
-            norms.extend(n)
-            if mesh.texcoords:
-                uvs.extend(mesh.texcoords[idx])
-            else:
-                uvs.extend((0.0, 0.0))
-            if mesh.vertex_colours is not None:
-                cols.extend(mesh.vertex_colours[idx])
-            else:
-                cols.extend(mesh.colour)
-
-    cache = (verts, norms, uvs, cols)
-    mesh._bake_cache = cache
-    return cache
-
-
-def _transform_dynamic(mesh, x, y, z, yaw=0.0):
-
-
-    verts, norms, uvs, cols = _mesh_bake(mesh)
-    cy = math.cos(yaw)
-    sy = math.sin(yaw)
-
-    out = []
-    vcount = len(verts) // 3
-    for i in range(vcount):
-        vx = verts[i * 3]
-        vy = verts[i * 3 + 1]
-        vz = verts[i * 3 + 2]
-
-        rx = vx * cy + vz * sy
-        rz = -vx * sy + vz * cy
-        out.extend([rx + x, vy + y, rz + z])
-
-        nx, ny, nz = norms[i * 3], norms[i * 3 + 1], norms[i * 3 + 2]
-        nrx = nx * cy + nz * sy
-        nrz = -nx * sy + nz * cy
-        out.extend([nrx, ny, nrz])
-
-        out.extend([uvs[i * 2], uvs[i * 2 + 1]])
-        out.extend([cols[i * 3], cols[i * 3 + 1], cols[i * 3 + 2]])
-    return out
-
-
 class BatchGroup:
 
 
@@ -204,42 +96,56 @@ class BatchGroup:
         self.vbo = vbo
 
 
-def build_batches(meshes):
-
-
+def pack_meshes(meshes):
     groups = {}
-
     for mesh in meshes:
-        vd, vc = _build_vertex_data(mesh)
-        if vc == 0:
+        if not mesh.faces:
             continue
-        key = (mesh.colour, mesh.texcoords is not None)
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(vd)
+        faces = np.asarray(mesh.faces,dtype=np.int32)
+        vertices = np.asarray(mesh.vertices,dtype=np.float32)
+        points = vertices[faces]
+        normals = np.cross(points[:,1]-points[:,0],points[:,2]-points[:,0])
+        normals /= np.maximum(np.linalg.norm(normals,axis=1,keepdims=True),1e-9)
+        data = np.empty((len(faces),3,11),dtype=np.float32)
+        data[:,:,:3] = points+mesh.position
+        data[:,:,3:6] = normals[:,None,:]
+        data[:,:,6:8] = np.asarray(mesh.texcoords)[faces] if mesh.texcoords else 0
+        data[:,:,8:11] = np.asarray(mesh.vertex_colours)[faces] if mesh.vertex_colours else mesh.colour
+        key = mesh.texcoords is not None
+        groups.setdefault(key,[]).append(data.reshape(-1,11))
+    return [(texture,np.concatenate(parts)) for texture,parts in groups.items()]
 
+
+def upload_batches(packed):
     batches = []
-    for (colour, use_texture), data_list in groups.items():
-        total_len = sum(len(d) for d in data_list)
-        combined = [0.0] * total_len
-        offset = 0
-        for d in data_list:
-            combined[offset:offset + len(d)] = d
-            offset += len(d)
-
-
-        vbo = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
-        arr = (gl.GLfloat * len(combined))(*combined)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STATIC_DRAW)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
-
-        batches.append(BatchGroup(colour, use_texture, combined, len(combined) // 11, vbo))
-
+    try:
+        for texture,data in packed:
+            vbo = gl.glGenBuffers(1)
+            batches.append(BatchGroup((255,255,255),texture,None,len(data),vbo))
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER,vbo)
+            gl.glBufferData(gl.GL_ARRAY_BUFFER,data.nbytes,data,gl.GL_STATIC_DRAW)
+    except Exception:
+        if batches:gl.glDeleteBuffers(len(batches),[b.vbo for b in batches])
+        raise
+    finally:gl.glBindBuffer(gl.GL_ARRAY_BUFFER,0)
     return batches
 
 
+def build_batches(meshes):
+    return upload_batches(pack_meshes(meshes))
+
+
 class OpenGLRenderer:
+    def visible(self,camera,x,y,z,radius):
+        dx,dy,dz = x-camera.x,y-camera.y,z-camera.z
+        cy,sy = math.cos(camera.yaw),math.sin(camera.yaw)
+        rx,forward = dx*cy-dz*sy,dx*sy+dz*cy
+        cp,sp = math.cos(camera.pitch),math.sin(camera.pitch)
+        vertical,depth = dy*cp+forward*sp,-dy*sp+forward*cp
+        return (depth+radius>self.near and depth-radius<self.fog_far+8
+                and abs(rx)<max(0,depth)*self.width/(2*self.focal_length)+radius*1.5
+                and abs(vertical)<max(0,depth)*self.height/(2*self.focal_length)+radius*1.5)
+
     def __init__(self, width, height):
         self.width = width
         self.height = height
@@ -250,6 +156,7 @@ class OpenGLRenderer:
 
         self.vao = gl.glGenVertexArrays(1)
         self.dynamic_vbo = gl.glGenBuffers(1)
+        self._dynamic_capacity = 0
 
 
         self._sprite_tex_cache = {}
@@ -568,6 +475,7 @@ class OpenGLRenderer:
 
         arr = (gl.GLfloat * len(data))(*data)
         gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
+        self._dynamic_capacity = ctypes.sizeof(arr)
 
 
         colour_array = (gl.GLfloat * 3)(255.0, 255.0, 255.0)
@@ -585,46 +493,56 @@ class OpenGLRenderer:
         gl.glUseProgram(0)
 
     def render_mesh_dynamic(self, camera, mesh, x, y, z, yaw=0.0, alpha=None):
+        self.render_models(camera,[(mesh,x,y,z,yaw)],alpha)
 
-
-        data = _transform_dynamic(mesh, x, y, z, yaw)
-        if not data:
+    def render_models(self,camera,instances,alpha=None):
+        groups = {}
+        for mesh,x,y,z,yaw in instances:
+            if not mesh.faces:
+                continue
+            source = getattr(mesh,'source',mesh)
+            cached = getattr(source,'_packed_dynamic',None)
+            if cached is None:
+                cached = pack_meshes([source])[0][1]
+                source._packed_dynamic = cached
+            data = cached.copy()
+            if source is not mesh:
+                rotation,offset = np.eye(3,dtype=np.float32),np.zeros(3,dtype=np.float32)
+                for pivot,pitch,turn in mesh.rotations:
+                    cp,sp,ct,st = math.cos(pitch),math.sin(pitch),math.cos(turn),math.sin(turn)
+                    matrix = np.array(((ct,st*sp,st*cp),(0,cp,-sp),(-st,ct*sp,ct*cp)),dtype=np.float32)
+                    pivot = np.asarray(pivot,dtype=np.float32)
+                    offset = matrix@offset+pivot-matrix@pivot
+                    rotation = matrix@rotation
+                data[:,:3] = data[:,:3]@rotation.T+offset+mesh.translation
+                data[:,3:6] = data[:,3:6]@rotation.T
+            cy,sy = math.cos(yaw),math.sin(yaw)
+            # Placement is already supplied by the caller, including mesh.position.
+            vertices = data[:,:3]-mesh.position
+            data[:,0] = vertices[:,0]*cy+vertices[:,2]*sy+x
+            data[:,1] = vertices[:,1]+y
+            data[:,2] = -vertices[:,0]*sy+vertices[:,2]*cy+z
+            nx,nz = data[:,3].copy(),data[:,5].copy()
+            data[:,3],data[:,5] = nx*cy+nz*sy,-nx*sy+nz*cy
+            groups.setdefault(mesh.texcoords is not None,[]).append(data)
+        if not groups:
             return
-
-        if alpha is None:
-            alpha = getattr(mesh, 'alpha', 1.0)
-        transparent = alpha < 1.0
-
         gl.glUseProgram(self.shader)
         self._set_camera_uniforms(camera)
-
         gl.glActiveTexture(gl.GL_TEXTURE0)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
-        gl.glUniform1i(self.texture_loc, 0)
-
+        gl.glBindTexture(gl.GL_TEXTURE_2D,self.leaf_tex_id)
+        gl.glUniform1i(self.texture_loc,0)
+        gl.glUniform1f(self.alpha_loc,1 if alpha is None else alpha)
         gl.glBindVertexArray(self.vao)
         self._define_attribs(self.dynamic_vbo)
-
-        arr = (gl.GLfloat * len(data))(*data)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
-
-        colour = mesh.colour
-        colour_array = (gl.GLfloat * 3)(colour[0], colour[1], colour[2])
-        gl.glUniform3fv(self.color_loc, 1, colour_array)
-        gl.glUniform1i(self.use_texture_loc, 1 if (mesh.texcoords is not None) else 0)
-        gl.glUniform1f(self.alpha_loc, max(0.0, min(1.0, alpha)))
-
-        if transparent:
-            gl.glEnable(gl.GL_BLEND)
-            gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-
-        gl.glDrawArrays(gl.GL_TRIANGLES, 0, len(data) // 11)
-
-        gl.glDisableVertexAttribArray(0)
-        gl.glDisableVertexAttribArray(1)
-        gl.glDisableVertexAttribArray(2)
-        gl.glDisableVertexAttribArray(3)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        for texture,parts in groups.items():
+            data = np.concatenate(parts)
+            if data.nbytes>self._dynamic_capacity:
+                self._dynamic_capacity = 1 << max(10,(data.nbytes-1).bit_length())
+                gl.glBufferData(gl.GL_ARRAY_BUFFER,self._dynamic_capacity,None,gl.GL_STREAM_DRAW)
+            gl.glBufferSubData(gl.GL_ARRAY_BUFFER,0,data.nbytes,data)
+            gl.glUniform1i(self.use_texture_loc,int(texture))
+            gl.glDrawArrays(gl.GL_TRIANGLES,0,len(data))
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
 

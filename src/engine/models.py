@@ -1,6 +1,7 @@
 import math
 import random
-from engine.mesh import Mesh, create_prism, create_pyramid
+from functools import lru_cache
+from engine.mesh import Mesh, MeshPose, create_prism, create_pyramid
 from engine.worldgen import create_branch
 from engine.animation import dog_motion, spear_motion, rotate_point
 
@@ -75,6 +76,7 @@ def spear():
     return [shaft, tip]
 
 
+@lru_cache(maxsize=1)
 def dog():
     fur, dark = (137, 91, 54), (69, 46, 32)
     parts = [('body', create_prism(.52, .42, .90, fur, (0, .60, 0))),
@@ -99,24 +101,18 @@ def pose_dog(meshes, time, walk_phase=0, walk_blend=0):
         return meshes
     posed = []
     for mesh in meshes:
-        vertices = []
-        for vertex in mesh.vertices:
-            point = tuple(a+b for a, b in zip(vertex, mesh.position))
-            if mesh.joint == 'jaw':
-                point = rotate_point(point, (0, .72, .61), pitch=jaw*.55)
-            if mesh.joint in ('head', 'jaw'):
-                point = rotate_point(point, (0, .82, .45), pitch=.12*prepare+.10*strike)
-            elif mesh.joint == 'leg':
-                x, _, z = mesh.position
-                diagonal = 1 if x*z > 0 else -1
-                angle = math.sin(walk_phase)*walk_blend*.35*diagonal
-                point = rotate_point(point, (x, .46, z), pitch=angle-.25*strike*(1 if z > 0 else -1))
-            elif mesh.joint == 'tail':
-                point = rotate_point(point, (0, .68, -.40), yaw=.12*math.sin(walk_phase)*walk_blend)
-            point = rotate_point(point, (0, .60, 0), pitch=.09*prepare-.08*strike)
-            x, y, z = point
-            vertices.append((x, y-.07*prepare+.06*strike, z-.10*prepare+.32*strike))
-        posed.append(Mesh(vertices, mesh.faces, mesh.colour, (0, 0, 0), vertex_colours=mesh.vertex_colours))
+        rotations = []
+        if mesh.joint=='jaw':rotations.append(((0,.72,.61),jaw*.55,0))
+        if mesh.joint in ('head','jaw'):
+            rotations.append(((0,.82,.45),.12*prepare+.10*strike,0))
+        elif mesh.joint=='leg':
+            x,_,z = mesh.position
+            angle = math.sin(walk_phase)*walk_blend*.35*(1 if x*z>0 else -1)
+            rotations.append(((x,.46,z),angle-.25*strike*(1 if z>0 else -1),0))
+        elif mesh.joint=='tail':
+            rotations.append(((0,.68,-.40),0,.12*math.sin(walk_phase)*walk_blend))
+        rotations.append(((0,.60,0),.09*prepare-.08*strike,0))
+        posed.append(MeshPose(mesh,rotations,(0,-.07*prepare+.06*strike,-.10*prepare+.32*strike)))
     return posed
 
 
@@ -181,9 +177,16 @@ RESOURCE_MODELS = {"can": food_can, "bottle": plastic_bottle, "stick": stick, "r
 
 
 def axe():
-    return [create_branch((.45, -.55, .65), (.45, -.15, 1.55), .08, (133, 93, 50)),
-            create_prism(.48, .27, .13, (154, 166, 167), (.30, -.12, 1.55)),
-            create_prism(.10, .31, .15, (209, 216, 206), (.02, -.12, 1.55))]
+    handle = create_branch((.43,-.65,.72),(.43,.25,1.03),.065,(139,94,46))
+    collar = create_prism(.14,.15,.17,(91,101,98),(.43,.23,1.03))
+    # Wedge edge faces forward. Hoe era is over.
+    outline = [(.43,.34,.98),(.43,.12,.98),(.43,.06,1.45),(.43,.40,1.45)]
+    vertices = [(x+side,y,z) for side in (-.075,.075) for x,y,z in outline]
+    faces = [(0,1,2),(0,2,3),(4,6,5),(4,7,6),(0,4,5),(0,5,1),
+             (1,5,6),(1,6,2),(3,2,6),(3,6,7),(0,3,7),(0,7,4)]
+    head = Mesh(vertices,faces,(153,166,168),(0,0,0))
+    edge = create_branch((.43,.06,1.45),(.43,.40,1.45),.035,(223,231,221))
+    return [handle,collar,head,edge]
 
 
 def pose_axe(meshes, remaining):
@@ -192,7 +195,7 @@ def pose_axe(meshes, remaining):
     posed = []
     for mesh in meshes:
         points = [rotate_point(tuple(a+b for a, b in zip(v, mesh.position)), (.45, -.55, .65),
-                               pitch=motion*.7, yaw=-motion*.45) for v in mesh.vertices]
+                               pitch=motion*1.15, yaw=-motion*.35) for v in mesh.vertices]
         posed.append(Mesh(points, mesh.faces, mesh.colour, (0, 0, motion*.15)))
     return posed
 
@@ -220,6 +223,7 @@ def skull_sign():
     return meshes
 
 
+@lru_cache(maxsize=1)
 def spider():
     meshes = [lathe([(-.22, .05), (0, .48), (.22, .25), (.26, 0)], (66, 46, 40), 12),
               create_prism(.46, .25, .48, (83, 55, 42), (0, .44, .36))]
@@ -239,16 +243,12 @@ def spider():
 
 def pose_spider(meshes, phase, moving, attack_time):
     from engine.animation import envelope
-    lunge = envelope(attack_time, .07, .18, .40)
+    lunge = envelope(attack_time, .07, .25, .65)
     posed = []
     for mesh in meshes:
-        points = []
-        for vertex in mesh.vertices:
-            point = tuple(a+b for a, b in zip(vertex, mesh.position))
-            if hasattr(mesh, 'leg'):
-                side, index, hip = mesh.leg
-                point = rotate_point(point, hip, yaw=math.sin(phase+index*math.pi/2)*moving*.20*side)
-            x, y, z = point
-            points.append((x, y+.05*lunge, z+.25*lunge))
-        posed.append(Mesh(points, mesh.faces, mesh.colour, (0, 0, 0)))
+        rotations = []
+        if hasattr(mesh,'leg'):
+            side,index,hip = mesh.leg
+            rotations.append((hip,0,math.sin(phase+index*math.pi/2)*moving*.20*side))
+        posed.append(MeshPose(mesh,rotations,(0,.05*lunge,.25*lunge)))
     return posed

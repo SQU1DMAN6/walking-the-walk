@@ -11,6 +11,16 @@ CONTROLS = ('W/A/S/D: move', 'Mouse: look', 'Shift: sprint', 'F: collect / read 
 
 
 class SurvivalHUD(TutorialHUD):
+    def prompt_rect(self,level,width,height,bottom):
+        prompt = level.world_prompt()
+        if prompt and prompt.target_id==level.beacon_id:
+            w = min(440,width-48)
+            lines = self.lines(prompt.text,w-24,self.small_font)
+            h = 22+self.small_font.size('A')[1]*(len(lines)+1)
+            rect = pygame.Rect((width-w)//2,height//2-h//2,w,h)
+            return prompt,rect,(width//2,height//2+h//2+12)
+        return super().prompt_rect(level,width,height,bottom)
+
     @staticmethod
     def hotbar_layout(width, height):
         return [rect.move(0, -24) for rect in TutorialHUD.hotbar_layout(width, height)]
@@ -73,6 +83,7 @@ class SurvivalHUD(TutorialHUD):
         self.text(surface, heading, width//2, 32, (248, 221, 122), self.title_font, True)
         self.text(surface, f'Time {level.elapsed:.1f}s | Defeated {level.stats["defeated"]} | Trees {level.stats["trees"]}',
                   width//2, 68, font=self.small_font, center=True)
+        self.text(surface,f'{level.config.difficulty} / {level.config.length}',width//2,88,font=self.slot_font,center=True)
         column = (panel.width-48)//2
         per_column = (len(CONTROLS)+1)//2
         step = max(28, self.small_font.size('A')[1]+5)
@@ -162,11 +173,17 @@ class SurvivalHUD(TutorialHUD):
         self.wrapped(overlay, selected, width//2, y+4, width-56, font=self.small_font, center=True)
         if level.use_progress:
             pygame.draw.rect(overlay, (124, 218, 182), (22, cells[0].top-13, int((width-44)*level.use_progress/USE_DURATION), 4))
+        if level.beacon_commit>0:
+            self.text(overlay,'Linking beacon... stay close',width//2,height//2+45,
+                      (131,230,211),self.small_font,True)
         hint = 'Press [H] to pause or show controls'
         hint_font = BitmapFont(self.small_font.scale*min(1, 18/self.small_font.size('A')[1]))
         self.panel(overlay, (width-hint_font.size(hint)[0]-24, height-31, hint_font.size(hint)[0]+16, 26))
         self.text(overlay, hint, width-16-hint_font.size(hint)[0], height-27, font=hint_font)
         self.text(overlay, f'{level.elapsed:.1f}s', 12, height-27, font=hint_font)
+        objective = 'Objective: reach northern beacon'
+        objective_font = BitmapFont(self.small_font.scale*min(1,(width-32)/self.small_font.size(objective)[0]))
+        self.text(overlay,objective,12,124,font=objective_font)
         if level.notification_timer > 0:
             toast_width = min(440, max(168, width-480))
             lines = self.lines(level.notification, toast_width-20, self.small_font)

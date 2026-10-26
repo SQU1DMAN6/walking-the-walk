@@ -8,7 +8,7 @@ import pygame
 from OpenGL import GL as gl
 from engine.camera import Camera
 from engine.level1 import Level1, Stage
-from engine.opengl_renderer import OpenGLRenderer, build_batches
+from engine.opengl_renderer import OpenGLRenderer, build_batches, upload_batches
 from engine.ui import TutorialHUD
 from engine.screenshot import save_png
 from engine.input import PointerCapture
@@ -39,14 +39,17 @@ def render_scene(renderer, level, batches):
     gl.glClearColor(*SKY_COLOUR, 1.0)
     gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
     renderer.render_frame(camera, batches)
+    instances = []
     for entity in level.entities.all():
-        if entity.visible:
+        distance = entity.distance_to(camera.x,camera.z)
+        if entity.visible and (not getattr(level,'is_survival',False) or
+                               (distance < 58 and renderer.visible(camera,entity.x,entity.y,entity.z,2))):
             for mesh in entity.render_meshes:
 
                 mx, my, mz = mesh.position
                 cy, sy = math.cos(entity.yaw), math.sin(entity.yaw)
-                renderer.render_mesh_dynamic(camera, mesh, entity.x+mx*cy+mz*sy,
-                                             entity.y+my, entity.z-mx*sy+mz*cy, entity.yaw)
+                instances.append((mesh,entity.x+mx*cy+mz*sy,entity.y+my,entity.z-mx*sy+mz*cy,entity.yaw))
+    renderer.render_models(camera,instances)
     prompt = level.world_prompt()
     for marker in level.objective_markers():
         if prompt and marker.target_id == prompt.target_id and marker.style == 'arrow':
@@ -82,8 +85,7 @@ def render_scene(renderer, level, batches):
             meshes = [*level.held_compass_meshes, models.pose_compass(level.compass_needle, relative)]
         else:
             meshes = level.held_props.get(held, ())
-        for mesh in meshes:
-            renderer.render_mesh_dynamic(hand_camera, mesh, 0, 0, 0)
+        renderer.render_models(hand_camera,[(m,*m.position,0) for m in meshes])
 
 
 class Application:
@@ -95,12 +97,15 @@ class Application:
         self.pointer = PointerCapture()
         self.level = self.renderer = None
         self.batches = []
+        self.chunk_batches = {}
+        self.upload_times = []
         self.executor = self.loading_future = None
         self.loading_visible = False
         self.loading_signature = None
         self.render_revision = 0
         self.paused = False
         self.running = True
+        self.just_started = False
 
     def return_to_title(self):
         self.pointer.set_active(False)
@@ -113,6 +118,12 @@ class Application:
         self.menu.back()
 
     def release_world(self):
+        if self.level and hasattr(self.level.world,'close'):
+            self.level.world.close()
+        for _,batches in self.chunk_batches.values():
+            if batches:
+                gl.glDeleteBuffers(len(batches),[b.vbo for b in batches])
+        self.chunk_batches.clear()
         if self.batches:
             gl.glDeleteBuffers(len(self.batches), [batch.vbo for batch in self.batches])
         if self.renderer:
@@ -245,6 +256,8 @@ class Application:
                 self.level.handle_attack()
 
     def update(self, dt):
+        was_loading = self.menu.screen==Screen.LOADING
+        self.just_started = False
         self.menu.elapsed += dt
         if self.menu.screen == Screen.LOADING and self.loading_visible and not self.menu.error:
             if self.level and not self.menu.run_requested and not getattr(self.level, 'is_survival', False):
@@ -265,13 +278,18 @@ class Application:
                     self.loading_future = (self.executor.submit(SurvivalRun, Camera(), self.seed, self.menu.config)
                                            if self.menu.run_requested else self.executor.submit(Level1, Camera(), self.seed))
                 if self.loading_future.done():
+                    level = None
                     try:
                         level = self.loading_future.result()
                         self.renderer = OpenGLRenderer(self.width, self.height)
                         self.renderer.focal_length = self.width*.7
-                        self.renderer.fog_color = (.18, .28, .22)
-                        self.renderer.fog_near, self.renderer.fog_far = 24, 68
-                        self.batches = build_batches(level.world.meshes)
+                        is_run = getattr(level,'is_survival',False)
+                        self.renderer.fog_color = SKY_COLOUR if is_run else (.18,.28,.22)
+                        self.renderer.fog_near,self.renderer.fog_far = (28,60) if is_run else (24,68)
+                        if getattr(level,'is_survival',False):
+                            self.sync_chunks(level,initial=True)
+                        else:
+                            self.batches = build_batches(level.world.meshes)
                         self.level = level
                         is_run = getattr(level, 'is_survival', False)
                         self.hud.close()
@@ -280,11 +298,13 @@ class Application:
                         self.menu.screen = Screen.RUN if is_run else Screen.TUTORIAL
                         self.render_revision = getattr(level.world, 'render_revision', 0)
                         print(json.dumps({'event': 'run_ready' if is_run else 'tutorial_ready', 'seed': self.seed,
-                                          'validation': level.world.validation, 'batches': len(self.batches)}), flush=True)
+                                          'validation': level.world.validation,
+                                          'batches': len(self.batches)+sum(len(bs) for _,bs in self.chunk_batches.values()),
+                                          'loaded_chunks':len(self.chunk_batches)}), flush=True)
                     except Exception as error:
-                        if self.renderer:
-                            self.renderer.close()
-                            self.renderer = None
+                        self.release_world()
+                        if level and hasattr(level.world,'close'):
+                            level.world.close()
                         self.menu.error = "Couldn't load the jungle. Head back and try again."
                         print(json.dumps({'event': 'load_error', 'error': str(error)}), flush=True)
                     self.loading_future = None
@@ -294,38 +314,79 @@ class Application:
         self.pointer.set_active(should_capture)
         if level:
             level.camera.grab_active = should_capture
+        if was_loading and playing:
+            self.just_started = True
+            return
         if should_capture:
-            level.camera.update(dt, self.pointer.delta())
-            level.update_use(dt, pygame.key.get_pressed()[pygame.K_e])
-            level.update(dt)
+            steps = max(1,math.ceil(dt/(1/60)))
+            delta = self.pointer.delta()
+            held = pygame.key.get_pressed()[pygame.K_e]
+            for i in range(steps):
+                if not level.active:break
+                level.camera.update(dt/steps,delta if i==0 else (0,0))
+                level.update_use(dt/steps,held)
+                level.update(dt/steps)
         elif playing and not self.paused and not level.crafting_open and not level.help_open:
-            level.update(dt)
+            steps = max(1,math.ceil(dt/(1/60)))
+            for _ in range(steps):level.update(dt/steps)
 
     def render(self, fps=0):
         if self.menu.screen in (Screen.TUTORIAL, Screen.RUN):
             revision = getattr(self.level.world, 'render_revision', 0)
-            if revision != self.render_revision:
+            if getattr(self.level,'is_survival',False):
+                self.sync_chunks(self.level)
+                visible = []
+                for key,(_,batches) in self.chunk_batches.items():
+                    x,z = (key[0]+.5)*32,(key[1]+.5)*32
+                    if self.renderer.visible(self.level.camera,x,self.level.world.height(x,z)+3,z,25):
+                        visible.extend(batches)
+                self.render_revision = revision
+                render_scene(self.renderer,self.level,visible)
+            elif revision != self.render_revision:
                 old = self.batches
                 self.batches = build_batches(self.level.world.meshes)
                 if old:
                     gl.glDeleteBuffers(len(old), [batch.vbo for batch in old])
                 self.render_revision = revision
-            render_scene(self.renderer, self.level, self.batches)
+            if not getattr(self.level,'is_survival',False):
+                render_scene(self.renderer, self.level, self.batches)
             self.hud.draw(self.level, self.width, self.height, fps, paused=self.paused)
         else:
             self.hud.draw_menu(self.menu, self.width, self.height)
             if self.menu.screen == Screen.LOADING:
                 self.loading_visible = True
 
+    def sync_chunks(self,level,initial=False):
+        chunks = level.world.chunks
+        for key in self.chunk_batches.keys()-chunks.keys():
+            _,old = self.chunk_batches.pop(key)
+            gl.glDeleteBuffers(len(old),[b.vbo for b in old])
+        pending = [chunk for key,chunk in chunks.items()
+                   if key not in self.chunk_batches or self.chunk_batches[key][0] != chunk.revision]
+        pending.sort(key=lambda c:math.hypot((c.key[0]+.5)*32-level.camera.x,(c.key[1]+.5)*32-level.camera.z))
+        for chunk in pending[:len(pending) if initial else 1]:
+            started = time.perf_counter()
+            batches = upload_batches(chunk.packed)
+            old = self.chunk_batches.get(chunk.key)
+            self.chunk_batches[chunk.key] = chunk.revision,batches
+            if old:
+                gl.glDeleteBuffers(len(old[1]),[b.vbo for b in old[1]])
+            self.upload_times.append((time.perf_counter()-started)*1000)
+            self.upload_times = self.upload_times[-128:]
+
     def close(self):
         self.pointer.set_active(False)
         self.hud.close()
-        if self.batches:
-            gl.glDeleteBuffers(len(self.batches), [batch.vbo for batch in self.batches])
-        if self.renderer:
-            self.renderer.close()
         if self.executor:
             self.executor.shutdown(wait=True, cancel_futures=True)
+        if self.loading_future and not self.loading_future.cancelled() and self.loading_future.done():
+            try:
+                loaded = self.loading_future.result()
+                if loaded is not self.level and hasattr(loaded.world,'close'):
+                    loaded.world.close()
+            except Exception:
+                pass
+        self.release_world()
 
 
 def main(argv=None):
@@ -357,7 +418,7 @@ def main(argv=None):
                           'fullscreen': not args.windowed, 'size': [width, height],
                           'opengl': gl.glGetString(gl.GL_VERSION).decode()}), flush=True)
         while app.running:
-            dt = min(clock.tick(60)/1000, .1)
+            dt = min(clock.tick(60)/1000, .25)
             for event in pygame.event.get():
                 app.handle_event(event)
             app.update(dt)
@@ -366,6 +427,8 @@ def main(argv=None):
             if error != gl.GL_NO_ERROR:
                 raise RuntimeError(f'OpenGL frame error: {error}')
             pygame.display.flip()
+            if app.just_started:
+                clock.tick()
             frames += 1
             now = time.monotonic()
             if args.smoke_test and now-last_report >= 1:

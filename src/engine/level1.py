@@ -93,6 +93,7 @@ class Level1:
         self.camera.movement_cb = self.world.move
         self.camera.move_speed = PLAYER_SPEED
         self.camera.sprint_factor = 1.35
+        self.camera.survival_stamina = False
         self.camera.x, ground, self.camera.z = self.world.spawn
         self.camera.y = ground+self.camera.eye_height
         a, b = self.world.paths.route[:2]

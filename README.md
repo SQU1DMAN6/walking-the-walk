@@ -2,11 +2,13 @@
 
 ### Written by Quan Thai
 
-### Current release: Version 1
+### Current implementation: Version 1.5 — The Survival Mode Revamp
 
 A first-person exploration and PvE survival game set in **CS Jungle**. Navigate winding rainforest paths, scavenge materials, craft equipment, survive dogs and giant spiders, and activate the northern end beacon. Skull signs warn of dangerous shortcuts; longer detours offer fewer encounters. An axe can open alternative routes through trees.
 
-**Play** opens configuration: Easy, Medium or Hard, and Short, Normal or Long. Choose with the mouse or Up/Down and Left/Right, then select Start run. Generation happens behind a loading screen and verifies a connected route before play. Every run starts with full health/stamina, an empty inventory and fresh world state. The **Tutorial** remains a separate guided level. About retains the project's authored information.
+**Play** opens configuration: Easy, Medium or Hard, and Short, Normal or Long. Choose with the mouse or Up/Down and Left/Right, then select Start run. Seeded routes, ridges, valleys, broadleaf trees, rocky patches and undergrowth continue into streamed chunks as you explore. Chopped trees, collected supplies, dropped stacks and enemy state survive chunk reloads during the run. Every run starts with full health/stamina and an empty inventory. The **Tutorial** remains a separate guided level; About retains the project's authored information.
+
+Short, Normal and Long place the northern beacon roughly 1.1, 1.7 and 2.3 km from spawn. Safer winding routes are longer. The initial goals are approximately 5–7, 8–10 and 10–14 minutes, with actual times depending on combat and route choices. Difficulty changes resources, populations, group sizes, pursuit memory and northern escalation independently of length.
 
 ## Run
 
@@ -38,7 +40,7 @@ The game starts fullscreen. Use `--windowed --width 1280 --height 800` for a win
 | R after death/completion | Configure another run |
 | Ctrl+Q | Exit |
 
-Nine inventory slots show quantities, item names and the selected item's type/action. Pick up cans and bottles to receive food/water **and their scrap immediately** in the main game. Food and water heal ten; bandages roll 20–35 healing once per completed use, capped at maximum health. Full-health use does not waste supplies. Dropped stacks remain recoverable and do not generate extra scrap.
+Nine inventory slots show quantities, item names and the selected item's type/action. Cans and bottles enter the pack as consumables. **Scrap appears only after consumption**, once per container. Food and water heal ten and may be consumed at full health to obtain crafting scrap; the HUD reports the actual healing. Bandages roll 20–35 once per completed use and cannot be wasted at full health. Healing takes one second, damage interrupts it, and E must be released between uses. Dropping and recovering a container does not award scrap.
 
 | Recipe | Ingredients |
 | --- | --- |
@@ -49,10 +51,16 @@ Nine inventory slots show quantities, item names and the selected item's type/ac
 
 Stone uses the existing `rock` inventory item. Decorative pebbles are smaller and cannot be collected. Three in-range axe chops remove a tree, update collision and drop three leaves. The guaranteed route is traversable without an axe. Recipes, weapon parameters and difficulty settings are defined in `run_recipes.py`, `run_config.py` and `items.py`.
 
-Hold the compass's numbered slot to see its dial and red needle pointing towards the beacon. It shows the destination, leaving route choice to the player. Play has no tutorial objective arrows or lessons; its persistent H hint opens controls. Pause/crafting stops the encounter and run timer. Death and completion show distinct results, with new-run/menu/exit options. Returning to the title discards the run.
+Dogs patrol, check vision and investigate walking, sprinting, fighting and chopping noises. They search a last known location after losing sight. Spiders can drop from trees with a visible warning, pursue, intercept and approach from different angles. Bodies block movement; attacks require valid range and clear space. Easy/Medium allow one nearby attack windup at a time; Hard allows two, spaced apart. Back away, use cover and pick your fights. Survival stamina recovers while walking and more quickly while resting.
+
+Hold the compass's numbered slot to see its dial and red needle pointing towards the fixed beacon, including across unloaded chunks. It provides a bearing; route choices remain yours. Play has an objective line and contextual prompts, with no tutorial arrows or lessons. Pause/crafting stops encounters and the run timer. F starts a 0.8-second beacon link; leaving interaction range or taking damage interrupts it. Death and completion show distinct results, elapsed time, configuration and new-run/menu/exit options. Returning to the title discards the run.
 
 Tutorial retains its established sequence and balances: 80 starting health, food/water replaced by scrap after consumption, guided resource/equipment steps and the centred-then-yellow lesson panel. H opens its control reference. Mouse-look still uses SDL relative capture with stale motion flushed on focus changes. Blue sky, pass-through bushes and collision with trees/world bounds remain.
 
-Run `bash tests/run_v1_checks.sh` for tutorial regressions, v1 tests, the configuration/seed matrix, survival simulations and OpenGL captures. Every execution has a ten-second timeout. Tests use SDL offscreen by default; desktop input feel and subjective difficulty remain playtest checks. See the [v1 change report](doc/IMPLEMENTATION-v1-2026_10_20.md) and [requirement audit](doc/SPEC-COMPLIANCE-v1-2026_10_20.md).
+Run `bash tests/run_v15_checks.sh` for the complete validation suite. Optional stages are `unit`, `world`, `balance`, `visual`, `performance` and `audit`. Compilation, unit suites, world checks, captures and launch smoke tests have ten-second deadlines. Accelerated full-run simulations allow 45 seconds per process; the sustained rendering test allows 60 seconds. The old v1 runner forwards to this suite.
 
-_Walking the Walk, Version 1, Written by Quan Thai, October 2026_
+Tests use SDL offscreen and real OpenGL, with results under `doc/validation/v1.5/`. The [v1.5 implementation and requirement review](doc/IMPLEMENTATION-v1_5-2026_10_26.md) records timings, screenshots, known limitations and manual checks still needed. Desktop mouse feel, peer difficulty assessment and hardware GPU performance require playtesting. This development environment uses Mesa's software OpenGL driver; its FPS is not a hardware GPU benchmark. The separate legacy Python rasteriser is not an application launch mode.
+
+Streaming retains at most 36 chunks, two pending generation jobs and one generation worker, with no unloaded terrain cache. Rendering uploads at most one changed chunk per frame after initial loading. Exploration is bounded at ±8,192 metres; there is room well beyond the route without an immediate tree-line wall. Per-run edits are in memory, with limits of 4,096 chopped trees, 4,096 saved partial chops and 512 loose stacks. There is no save-to-disk feature. `doc/` and `tests/` remain ignored by the repository's existing Git rules.
+
+_Walking the Walk, Version 1.5, Written by Quan Thai, October 2026_

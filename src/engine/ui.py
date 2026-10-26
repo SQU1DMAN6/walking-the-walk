@@ -292,7 +292,7 @@ class TutorialHUD:
             self.text(surface, 'Walking the Walk', width//2, int(height*.16), (248, 221, 122), self.logo_font, center=True)
             self.text(surface, 'Written by Quan Thai', width//2, int(height*.16)+self.logo_font.size('A')[1]+18,
                       font=self.font, center=True)
-            self.text(surface, 'Version 1', width//2, int(height*.16)+self.logo_font.size('A')[1]+50,
+            self.text(surface, 'Version 1.5', width//2, int(height*.16)+self.logo_font.size('A')[1]+50,
                       font=self.font, center=True)
             for index, (label, button) in enumerate(zip(TITLE_BUTTONS, buttons)):
                 self.button(surface, button, label, index == menu.selected)

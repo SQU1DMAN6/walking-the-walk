@@ -20,7 +20,7 @@ DIFFICULTIES = {
     'Medium': Difficulty(1.0, 2, 2, 16, 4, 1.3, .20),
     'Hard': Difficulty(.65, 3, 3, 10, 7, .7, .30),
 }
-LENGTHS = {'Short': (64, 96, 2), 'Normal': (80, 160, 3), 'Long': (96, 224, 4)}
+LENGTHS = {'Short': (96, 1120, 7), 'Normal': (96, 1680, 11), 'Long': (96, 2300, 15)}
 
 
 @dataclass(frozen=True)
@@ -43,6 +43,7 @@ WEAPONS = {
 }
 SPIDER = {'health': 60, 'speed': PLAYER_SPEED*1.35, 'detection': 9.0, 'range': 1.35,
           'damage': 5, 'cooldown': .5, 'windup': .18, 'recovery': .22}
+SURVIVAL_SPIDER = {**SPIDER,'speed':4.4,'detection':20,'cooldown':.65,'windup':.25,'recovery':.4}
 TREE_CHOPS = 3
 TREE_LEAVES = 3
 HEAL_RANGE = (20, 35)
