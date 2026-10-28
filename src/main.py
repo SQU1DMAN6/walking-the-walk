@@ -12,7 +12,7 @@ from engine.opengl_renderer import OpenGLRenderer, build_batches, upload_batches
 from engine.ui import TutorialHUD
 from engine.screenshot import save_png
 from engine.input import PointerCapture
-from engine.items import RECIPE_ORDER
+from engine.items import RECIPE_ORDER,SPEAR_ANIMATION
 from engine import models
 from engine.menu import MenuFlow, Screen
 from engine.survival import SurvivalRun
@@ -78,9 +78,9 @@ def render_scene(renderer, level, batches):
         hand_camera.pivot_offset = 0
         gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
         if held == 'spear':
-            meshes = models.pose_spear(level.weapon_meshes, level.attack_anim_timer)
+            meshes = models.pose_spear(level.weapon_meshes,level.attack_anim_timer*SPEAR_ANIMATION/level.attack_anim_duration)
         elif held == 'axe':
-            meshes = models.pose_axe(level.axe_meshes, level.attack_anim_timer)
+            meshes = models.pose_axe(level.axe_meshes,level.attack_anim_timer*.45/level.attack_anim_duration)
         elif held == 'compass':
             relative, _, _ = level.compass_guidance()
             meshes = [*level.held_compass_meshes, models.pose_compass(level.compass_needle, relative)]
@@ -244,7 +244,12 @@ class Application:
                     level.select_slot(event.key-pygame.K_0)
         elif event.type == pygame.MOUSEMOTION:
             self.hud.mouse_pos = event.pos
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        elif event.type==pygame.MOUSEBUTTONDOWN and event.button in (1,3):
+            if event.button==3:
+                if (self.level.active and not self.paused and not self.level.help_open
+                        and not self.level.crafting_open and self.pointer.active):
+                    self.level.handle_attack(heavy=True)
+                return
             if self.level.help_open:
                 return
             if self.paused or not self.level.active:

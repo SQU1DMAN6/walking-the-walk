@@ -12,7 +12,7 @@ from engine.items import ITEMS, RECIPES, RUN_RECIPE_ORDER, HEAL_AMOUNT, USE_DURA
 from engine.level1 import Level1, Stage, INTERACTION_RANGE
 from engine.markers import ObjectiveMarker
 from engine.prompts import WorldPrompt
-from engine.run_config import (RunConfig, WEAPONS, TREE_CHOPS, TREE_LEAVES, HEAL_RANGE,
+from engine.run_config import (RunConfig, WEAPONS, HEAVY_ATTACK, TREE_CHOPS, TREE_LEAVES, HEAL_RANGE,
                                SPAWN_CLEARANCE, DAMAGE_GRACE, PERCEPTION, VENOM, RunSeeds)
 from engine.survival_world import SurvivalChunk
 from engine.streaming import chunk_key
@@ -453,13 +453,13 @@ class SurvivalRun(Level1):
             self.notify(' + '.join(f'+{qty} {ITEMS[item][0]}' for item, qty in self.loot(target).items()))
         return True
 
-    def attack_status(self):
+    def attack_status(self,heavy=False):
         weapon = WEAPONS.get(self.inventory.selected_item)
         if not weapon:
             return False, 'Equip a spear or axe'
         if self.attack_cooldown_timer > 1e-6:
             return False, f'Attack ready in {self.attack_cooldown_timer:.1f}s'
-        if self.camera.stamina < weapon['stamina']:
+        if self.camera.stamina < (HEAVY_ATTACK['stamina'] if heavy else weapon['stamina']):
             return False, 'Low stamina. Stop to recover.'
         return True, 'Left click to attack'
 
@@ -478,25 +478,26 @@ class SurvivalRun(Level1):
                 choices.append(target)
         return min(choices, key=lambda e: e.distance_to(self.camera.x, self.camera.z), default=None)
 
-    def _swing(self):
-        ready, reason = self.attack_status()
+    def _swing(self,heavy=False):
+        ready, reason = self.attack_status(heavy)
         if not ready:
             self.notify(reason, 1)
             return False
         weapon = WEAPONS[self.inventory.selected_item]
-        self.camera.stamina = max(0, self.camera.stamina-weapon['stamina'])
-        self.attack_cooldown_timer = weapon['cooldown']
-        self.attack_anim_timer = weapon['animation']
+        profile=HEAVY_ATTACK if heavy else weapon
+        self.camera.stamina=max(0,self.camera.stamina-profile['stamina'])
+        self.attack_cooldown_timer=profile['cooldown']
+        self.attack_anim_timer=self.attack_anim_duration=profile['animation']
         self.cancel_use()
         self.sound('fight',PERCEPTION['fight_noise'])
         return True
 
-    def handle_attack(self):
-        if not self.active or self.crafting_open or self.help_open or not self._swing():
+    def handle_attack(self,heavy=False):
+        if not self.active or self.crafting_open or self.help_open or not self._swing(heavy):
             return False
         target = self.attack_target()
         if target:
-            damage = WEAPONS[self.inventory.selected_item]['damage']
+            damage=HEAVY_ATTACK['damage'] if heavy else WEAPONS[self.inventory.selected_item]['damage']
             actual = target.receive_hit(damage) if target.kind=='boss' else min(target.health,damage)
             if target.kind!='boss':target.health = max(0,target.health-actual)
             self.notify(f'Hit: {actual} | {target.kind}: {target.health} health'+

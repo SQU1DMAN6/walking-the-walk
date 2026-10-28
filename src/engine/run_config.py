@@ -61,15 +61,16 @@ class RunConfig:
 
 
 WEAPONS = {
-    'spear': {'range': 3.5, 'damage': 25, 'stamina': 12, 'cooldown': .40, 'animation': .40},
-    'axe': {'range': 2.3, 'damage': 32, 'stamina': 18, 'cooldown': .55, 'animation': .45},
+    'spear': {'range': 3.5, 'damage': 25, 'stamina': 0, 'cooldown': .40, 'animation': .40},
+    'axe': {'range': 2.3, 'damage': 32, 'stamina': 0, 'cooldown': .55, 'animation': .45},
 }
+HEAVY_ATTACK = {'damage':60,'stamina':30,'cooldown':1.2,'animation':.7}
 SPIDER = {'health': 60, 'speed': PLAYER_SPEED*1.6, 'detection': 9.0, 'range': 1.35,
           'damage': 5, 'cooldown': .5, 'windup': .18, 'recovery': .22}
 SURVIVAL_SPIDER = {**SPIDER,'speed':5.8,'detection':PERCEPTION['spider_detection'],'range':1.95,
                   'cooldown':.75,'windup':.30,'recovery':.45}
-TREE_CHOPS = 3
-TREE_LEAVES = 3
+TREE_CHOPS = 4
+TREE_LEAVES = 4
 HEAL_RANGE = (20, 35)
 SPAWN_CLEARANCE = 12.0
 DAMAGE_GRACE = .20

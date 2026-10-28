@@ -11,7 +11,7 @@ from engine.run_config import DIFFICULTIES, LENGTHS
 
 class BitmapFont:
     def __init__(self,scale):
-        self.scale=max(1.,scale)
+        self.scale=max(.9,scale)
         self.pixels=round(32*self.scale)
 
     def render(self,text,antialias,colour):
@@ -44,10 +44,10 @@ class TutorialHUD:
         self._font_height = width, height
         scale=max(1.,min(1.25,height/900))
         self.font=BitmapFont(scale)
-        self.title_font=BitmapFont(scale*1.25)
-        self.logo_font=BitmapFont(scale*1.65)
-        self.small_font=BitmapFont(scale)
-        self.slot_font=BitmapFont(scale)
+        self.title_font=BitmapFont(scale*1.2)
+        self.logo_font=BitmapFont(scale*1.55)
+        self.small_font=BitmapFont(scale*.9)
+        self.slot_font=BitmapFont(scale*.9)
         self._text_cache.clear()
 
     def text(self, surface, text, x, y, colour=(231, 239, 225), font=None, center=False):
@@ -148,8 +148,8 @@ class TutorialHUD:
 
     @staticmethod
     def crafting_layout(width, height):
-        panel = pygame.Rect((width-min(880, width-32))//2, (height-min(570, height-32))//2,
-                            min(880, width-32), min(570, height-32))
+        panel = pygame.Rect((width-min(840, width-32))//2, (height-min(540, height-32))//2,
+                            min(840, width-32), min(540, height-32))
         list_width = max(264, int(panel.width*.30))
         rows = [pygame.Rect(panel.x+18, panel.y+87+i*83, list_width, 72) for i in range(len(RECIPE_ORDER))]
         button = pygame.Rect(panel.x+list_width+42, panel.bottom-115, panel.width-list_width-62, 51)
@@ -401,7 +401,7 @@ class TutorialHUD:
 
     @staticmethod
     def hotbar_layout(width,height):
-        pixels=max(32,round(32*max(1.,min(1.25,height/900))))
+        pixels=max(29,round(32*.9*max(1.,min(1.25,height/900))))
         columns=10 if (width-8)//10-2>=round(120*pixels/32)+4 else 5
         rows=10//columns
         cell=(width-8)//columns
@@ -443,7 +443,8 @@ class TutorialHUD:
         if item in ('food', 'water'):
             _, hint = level.use_status()
         elif item == 'spear':
-            _, hint = level.attack_status()
+            ready,hint=level.attack_status()
+            if ready:hint='Left click free | RMB 60'
         elif item == 'compass':
             guidance = level.compass_guidance()
             angle, distance, _ = guidance
@@ -451,7 +452,7 @@ class TutorialHUD:
             hint = f'Beacon {distance:.0f}m {turn}'
         else:
             hint = '[C]: crafting material'
-        return f'{name} x{qty} | {hint}'
+        return f'{name} | {hint}' if item=='spear' else f'{name} x{qty} | {hint}'
 
     def direction_panel(self, surface, guidance, lesson=None):
         font = self.small_font
@@ -520,7 +521,7 @@ class TutorialHUD:
 
     def controls_overlay(self,surface,width,height):
         rows=('WASD: move','Mouse: look','Shift: sprint','F: interact','1-9: slots','0: empty hand',
-              'Hold E: use','C: crafting','Arrows: recipe','Enter: craft','Left click: attack',
+              'Hold E: use','C: crafting','Arrows: recipe','Enter: craft','Left click: attack','Right: power (60)',
               'Compass: hold slot','H: controls','Esc: pause/back','R: retry results','Ctrl+Q: quit')
         self.controls_list(surface,rows,width,height,'[H] / [Esc]: return')
 

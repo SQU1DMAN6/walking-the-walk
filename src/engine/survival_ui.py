@@ -5,7 +5,7 @@ from engine.ui import TutorialHUD, BitmapFont
 
 
 CONTROLS = ('WASD: move','Mouse: look','Shift: sprint','F: use / chop','1-9: slots','0: empty hand',
-            'Hold E: use','Left click: attack','C: crafting','Arrows: recipe','Enter: craft','Compass: hold slot',
+            'Hold E: use','Left click: attack','Right: power (60)','C: crafting','Arrows: recipe','Enter: craft','Compass: hold slot',
             'H / Esc: pause/back','G: drop stack','R: retry results','Ctrl+Q: quit')
 
 
@@ -23,13 +23,13 @@ class SurvivalHUD(TutorialHUD):
 
     @staticmethod
     def hotbar_layout(width, height):
-        pixels=max(32,round(32*max(1.,min(1.25,height/900))))
+        pixels=max(29,round(32*.9*max(1.,min(1.25,height/900))))
         return [rect.move(0,-pixels-4) for rect in TutorialHUD.hotbar_layout(width,height)]
 
     @staticmethod
     def crafting_layout(width, height):
-        panel = pygame.Rect((width-min(880, width-32))//2, (height-min(570, height-32))//2,
-                            min(880, width-32), min(570, height-32))
+        panel = pygame.Rect((width-min(840, width-32))//2, (height-min(540, height-32))//2,
+                            min(840, width-32), min(540, height-32))
         list_width = max(264, int(panel.width*.30))
         rows = [pygame.Rect(panel.x+18, panel.y+82+i*62, list_width, 53) for i in range(4)]
         button = pygame.Rect(panel.x+list_width+42, panel.bottom-96, panel.width-list_width-62, 50)
@@ -94,7 +94,7 @@ class SurvivalHUD(TutorialHUD):
             self.wrapped(surface,line,panel.x+16+(i//3)*(column+16),150+(i%3)*64,
                          column,font=self.small_font)
         for rect, label in zip(rows, ('Resume [H / Enter]' if level.active else 'New run [R]',
-                                      'Controls', 'Return to main menu', 'Exit game')):
+                                      'Controls', 'Main menu', 'Exit game')):
             self.button(surface, rect, label)
 
     def controls_overlay(self,surface,width,height):
@@ -106,7 +106,8 @@ class SurvivalHUD(TutorialHUD):
             return 'Empty hand' if level.inventory.selected_slot == 9 else 'Empty slot'
         count = level.inventory.slots[level.inventory.selected_slot][1]
         if item in ('spear', 'axe'):
-            hint = level.attack_status()[1]
+            ready,hint=level.attack_status()
+            if ready:hint='Left click free | RMB 60'
         elif item in ('food', 'water', 'bandage'):
             hint = level.use_status()[1]
             cells=self.hotbar_layout(*self._font_height)
@@ -116,7 +117,7 @@ class SurvivalHUD(TutorialHUD):
             hint = f'Beacon {distance:.0f}m '+('ahead' if abs(angle) < .25 else 'right' if angle > 0 else 'left')
         else:
             hint = '[C] crafting'
-        return f'{ITEMS[item][0]} x{count} | {hint}'
+        return f'{ITEMS[item][0]} | {hint}' if item in ('spear','axe') else f'{ITEMS[item][0]} x{count} | {hint}'
 
     @staticmethod
     def icon(surface, item, x, y):

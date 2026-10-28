@@ -33,7 +33,8 @@ The game starts fullscreen. Use `--windowed --width 1280 --height 800` for a win
 | Hold E | Use selected food, water or bandage; release between uses |
 | C | Open/close crafting |
 | Up/Down, Enter | Choose recipe, craft; clicking also works |
-| Left click | Swing the held spear or axe, including in empty space |
+| Left click | Normal spear/axe attack, no stamina cost (including a miss) |
+| Right click | Power attack: 60 base damage, 30 stamina, 1.2-second shared cooldown |
 | G | Drop the selected stack; recover it with F |
 | H | Pause with controls and Resume/Menu/Exit options |
 | Esc | Close a panel, pause, or return to title while paused |
@@ -41,7 +42,7 @@ The game starts fullscreen. Use `--windowed --width 1280 --height 800` for a win
 | R after death/completion | Configure another run |
 | Ctrl+Q | Exit |
 
-Bitmap text uses the original fixed-width PSF artwork and smooth scaling, with a minimum native 16×32 glyph size (20 visible pixels for capital letters and a 36-pixel line box), larger headings and responsive layouts. Red arcs around the crosshair show the direction of recent hits and rotate as the camera turns; poison is labelled without inventing an attacker direction.
+Bitmap text uses the original fixed-width PSF artwork and smooth scaling, with a uniformly scaled original 16×32 glyphs (small text uses 90% scale, about 18 visible capital-letter pixels), larger headings and responsive layouts. Red arcs around the crosshair show the direction of recent hits and rotate as the camera turns; poison is labelled without inventing an attacker direction.
 
 Nine inventory slots show quantities, item names and the selected item's name/action. Cans and bottles enter the pack as consumables. **Scrap appears only after consumption**, once per container. Food and water heal ten. Water also restores the configured stamina amount (currently 60) and cures poison. They may be consumed at full health to obtain crafting scrap; the HUD reports the actual healing. Bandages roll 20–35 once per completed use and cannot be wasted at full health. Healing takes one second and continues while taking nonfatal damage; E must be released between uses. Death, changing slots, opening a menu or releasing E still cancels an unfinished use. Dropping and recovering a container does not award scrap.
 
@@ -50,9 +51,9 @@ Nine inventory slots show quantities, item names and the selected item's name/ac
 | Compass | 1 metal scrap + 1 plastic scrap |
 | Stone spear | 2 sticks + 1 stone |
 | Stone axe | 4 sticks + 5 stone |
-| Bandage | 3 leaves |
+| Bandage | 2 leaves |
 
-Stone uses the existing `rock` inventory item. Decorative pebbles are smaller and cannot be collected. Three in-range axe chops remove a tree, update collision and drop three leaves. The guaranteed route is traversable without an axe. Recipes, weapon parameters and difficulty settings are defined in `run_recipes.py`, `run_config.py` and `items.py`.
+Stone uses the existing `rock` inventory item. Decorative pebbles are smaller and cannot be collected. Four in-range axe chops remove a tree, update collision and drop four leaves. Chopping costs no stamina. The guaranteed route is traversable without an axe. Recipes, weapon parameters and difficulty settings are defined in `run_recipes.py`, `run_config.py` and `items.py`.
 
 Dogs are faster than walking and slower than sprinting. They patrol, check vision and investigate walking, sprinting, fighting and chopping noises. They pursue the last known location after losing sight, then search a widening area before disengaging. Spiders can drop from trees with a visible warning, pursue, intercept and approach from different angles. Enemies advance during ordinary windups and recovery; hits check current reach, direction, height and cover once per attack. Bodies block movement. Easy/Medium allow one nearby attack windup at a time; Hard allows two, spaced apart. Back away, use cover and pick your fights. Survival stamina recovers while walking and more quickly while resting.
 
@@ -76,3 +77,5 @@ _Walking the Walk, Version 1.6, Written by Quan Thai, October 2026_
 The final readability/feedback checks run with `bash tests/run_readability_checks.sh`. Every test process, screenshot capture and launch smoke test has a ten-second timeout. This suite covers the existing regressions plus large bitmap text, full-name inventory layouts, consumption through damage and directional hit feedback. See the [28 October follow-up report](doc/IMPLEMENTATION-readability-2026_10_28.md) for results and reviewed screenshots. Earlier v1.6 reports describe their original snapshots; the follow-up supersedes their damage-interrupts-consumption policy.
 
 The original PSF font restoration is verified against `tmp/walking-the-walk-old` at identical readable scales. Run `bash tests/run_psf_checks.sh` for all regressions, pixel comparisons and timed screenshots; see the [font restoration report](doc/IMPLEMENTATION-psf-restore-2026_10_28.md).
+
+Normal spear and axe swings are free; power attacks retain each weapon’s range and existing hit/armour rules. Both modes share recovery, so alternating mouse buttons cannot bypass the power cooldown. Run `bash tests/run_power_checks.sh` for timed regression checks and screenshots. See the [UI and power-attack report](doc/IMPLEMENTATION-power-attacks-2026_10_28.md). The original font reference is retained in a test fixture, so tests no longer depend on the removed temporary game copy.

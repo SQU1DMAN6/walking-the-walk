@@ -1,4 +1,5 @@
 from engine.feedback import DamageFeedback
+from engine.run_config import HEAVY_ATTACK
 from enum import IntEnum
 import math
 
@@ -81,6 +82,7 @@ class Level1:
         self.elapsed = 0.0
         self.attack_cooldown_timer = 0.0
         self.attack_anim_timer = 0.0
+        self.attack_anim_duration = SPEAR_ANIMATION
         self.notification = 'CS Jungle | Follow the path'
         self.notification_timer = 5.0
         self.objective_flash_timer = self.health_flash_timer = 0.0
@@ -322,7 +324,7 @@ class Level1:
         distance = math.hypot(dx, dz)
         return (dx*math.sin(self.camera.yaw)+dz*math.cos(self.camera.yaw))/distance if distance > 1e-6 else 1.0
 
-    def attack_status(self):
+    def attack_status(self,heavy=False):
         if self.inventory.selected_item != 'spear':
             number = self.inventory.number_for('spear')
             return False, f'Press [{number}] to equip spear' if number else 'Craft a spear first [C]'
@@ -330,6 +332,8 @@ class Level1:
             return False, 'No hostile target nearby'
         if self.attack_cooldown_timer > 0:
             return False, f'Attack ready in {self.attack_cooldown_timer:.1f}s'
+        if heavy and self.camera.stamina<HEAVY_ATTACK['stamina']:
+            return False,'Low stamina. Stop to recover.'
         target = self.dog
         distance = target.distance_to(self.camera.x, self.camera.z)
         vertical = math.atan2(target.y+.6-self.camera.y, max(distance, .01))
@@ -435,15 +439,17 @@ class Level1:
         self._update_prompt()
         return True
 
-    def handle_attack(self):
+    def handle_attack(self,heavy=False):
         if not self.active or self.crafting_open or self.help_open:
             return False
-        ready, reason = self.attack_status()
+        ready, reason = self.attack_status(heavy)
         if not ready:
             self.notify(reason, 1.2)
             return False
-        self.attack_cooldown_timer = SPEAR_COOLDOWN
-        self.attack_anim_timer = SPEAR_ANIMATION
+        self.attack_cooldown_timer=HEAVY_ATTACK['cooldown'] if heavy else SPEAR_COOLDOWN
+        self.attack_anim_timer=self.attack_anim_duration=HEAVY_ATTACK['animation'] if heavy else SPEAR_ANIMATION
+        if heavy:self.camera.stamina-=HEAVY_ATTACK['stamina']
+        self.cancel_use()
         target = self.dog
         if target is None:
             return False
@@ -455,7 +461,7 @@ class Level1:
         if (distance <= SPEAR_RANGE and alignment >= math.cos(math.radians(50)) and
                 abs(vertical_angle+self.camera.pitch) <= math.radians(65) and
                 self.world.line_clear(self.camera.x, self.camera.z, target.x, target.z, .1)):
-            target.health = max(0, target.health-SPEAR_DAMAGE)
+            target.health = max(0, target.health-(HEAVY_ATTACK['damage'] if heavy else SPEAR_DAMAGE))
             self.notify(f'Hit landed. Dog health: {target.health}')
             if target.health == 0:
                 self.entities.remove(target.id)
