@@ -243,7 +243,8 @@ def spider():
 
 def pose_spider(meshes, phase, moving, attack_time):
     from engine.animation import envelope
-    lunge = envelope(attack_time, .07, .25, .65)
+    from engine.run_config import SURVIVAL_SPIDER
+    lunge = envelope(attack_time,.07,SURVIVAL_SPIDER['windup'],SURVIVAL_SPIDER['cooldown'])
     posed = []
     for mesh in meshes:
         rotations = []
@@ -252,3 +253,67 @@ def pose_spider(meshes, phase, moving, attack_time):
             rotations.append((hip,0,math.sin(phase+index*math.pi/2)*moving*.20*side))
         posed.append(MeshPose(mesh,rotations,(0,.05*lunge,.25*lunge)))
     return posed
+
+
+@lru_cache(maxsize=1)
+def viper():
+    parts = []
+    for i in range(5):
+        x = math.sin(i*.9)*.15
+        mesh = create_branch((x,.16,-.65+i*.21),(math.sin((i+1)*.9)*.15,.19,-.44+i*.21),.11,(93,126,43))
+        parts.append(mesh)
+    parts.append(create_prism(.28,.17,.30,(105,151,50),(0,.22,.55)))
+    for side in (-1,1):
+        parts.append(create_prism(.045,.04,.025,(223,104,239),(side*.09,.27,.71)))
+        parts.append(create_branch((side*.07,.17,.66),(side*.07,.08,.75),.018,(235,222,192)))
+    return parts
+
+
+def pose_viper(meshes,phase,time):
+    from engine.animation import envelope
+    from engine.run_config import VENOM
+    strike = envelope(time,0,VENOM['windup'],VENOM['cooldown'])
+    return [MeshPose(m,[((0,.16,0),0,math.sin(phase+i*.6)*.08)],(0,.03*strike,.3*strike))
+            for i,m in enumerate(meshes)]
+
+
+@lru_cache(maxsize=2)
+def demon(phase=1):
+    skin = (111,39,36) if phase==1 else (172,53,30)
+    parts = [create_prism(1.25,1.55,.85,skin,(0,1.65,0)),
+             create_prism(.75,.70,.65,(70,34,38),(0,2.77,.12)),
+             create_prism(.62,.18,.20,(42,25,26),(0,2.56,.51))]
+    for side in (-1,1):
+        parts.extend([create_branch((side*.3,3.03,.05),(side*.65,3.82,-.12),.16,(222,196,140)),
+                      create_prism(.16,.08,.04,(255,155 if phase==1 else 232,42),(side*.19,2.85,.46)),
+                      create_branch((side*.4,1.0,0),(side*.45,.1,.22),.25,(64,38,38))])
+        arm = create_branch((side*.65,2.1,0),(side*.9,1.4,.8),.24,skin)
+        arm.arm = side
+        parts.append(arm)
+        claw = create_branch((side*.9,1.4,.8),(side*.6,1.25,2.7),.11,(199,178,139))
+        claw.arm = side
+        parts.append(claw)
+    return parts
+
+
+def pose_demon(meshes,state,time,phase,moving):
+    from engine.animation import envelope
+    from engine.run_config import BOSS
+    sweep = envelope(time,0,BOSS['cleave']['windup'],BOSS['cleave']['windup']+BOSS['cleave']['active']) if state=='cleave' else 0
+    raise_arms = envelope(time,0,BOSS['slam']['windup'],BOSS['slam']['windup']+BOSS['slam']['active']) if state=='slam' else 0
+    result = []
+    for mesh in meshes:
+        rotations = []
+        if hasattr(mesh,'arm'):
+            rotations = [((mesh.arm*.65,2.1,0),-.8*raise_arms,-mesh.arm*.55*sweep)]
+        result.append(MeshPose(mesh,rotations,(0,math.sin(phase)*moving*.035,0)))
+    return result
+
+
+def boss_omen():
+    parts = []
+    for side in (-1,1):
+        parts.extend([create_branch((side*.65,0,0),(side*.65,2.1,0),.13,(58,42,38)),
+                      create_prism(.60,.85,.06,(151,46,38),(side*.65,1.45,.05))])
+    parts.append(create_prism(1.8,.18,.15,(52,37,33),(0,2.0,0)))
+    return parts

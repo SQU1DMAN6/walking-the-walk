@@ -4,10 +4,9 @@ from engine.items import ITEMS, RECIPES, RUN_RECIPE_ORDER, USE_DURATION
 from engine.ui import TutorialHUD, BitmapFont
 
 
-CONTROLS = ('W/A/S/D: move', 'Mouse: look', 'Shift: sprint', 'F: collect / read / chop with axe',
-            '1-9: select inventory slot', '0: empty hand', 'Hold E: food / water / bandage',
-            'Left click: swing held weapon', 'C: open / close crafting', 'Up/Down + Enter: choose / craft',
-            'Compass: hold its numbered slot', 'H / Esc: pause or return', 'G: drop selected stack')
+CONTROLS = ('WASD: move','Mouse: look','Shift: sprint','F: use / chop','1-9: slots','0: empty hand',
+            'Hold E: use','Left click: attack','C: crafting','Arrows: recipe','Enter: craft','Compass: hold slot',
+            'H / Esc: pause/back','G: drop stack','R: retry results','Ctrl+Q: quit')
 
 
 class SurvivalHUD(TutorialHUD):
@@ -19,17 +18,19 @@ class SurvivalHUD(TutorialHUD):
             h = 22+self.small_font.size('A')[1]*(len(lines)+1)
             rect = pygame.Rect((width-w)//2,height//2-h//2,w,h)
             return prompt,rect,(width//2,height//2+h//2+12)
+        if level.use_progress or level.damage_feedback.hits:return None
         return super().prompt_rect(level,width,height,bottom)
 
     @staticmethod
     def hotbar_layout(width, height):
-        return [rect.move(0, -24) for rect in TutorialHUD.hotbar_layout(width, height)]
+        pixels=max(32,round(32*max(1.,min(1.25,height/900))))
+        return [rect.move(0,-pixels-4) for rect in TutorialHUD.hotbar_layout(width,height)]
 
     @staticmethod
     def crafting_layout(width, height):
         panel = pygame.Rect((width-min(880, width-32))//2, (height-min(570, height-32))//2,
                             min(880, width-32), min(570, height-32))
-        list_width = max(165, int(panel.width*.30))
+        list_width = max(264, int(panel.width*.30))
         rows = [pygame.Rect(panel.x+18, panel.y+82+i*62, list_width, 53) for i in range(4)]
         button = pygame.Rect(panel.x+list_width+42, panel.bottom-96, panel.width-list_width-62, 50)
         return panel, rows, button
@@ -37,13 +38,13 @@ class SurvivalHUD(TutorialHUD):
     @staticmethod
     def crafting_close_rect(width, height):
         panel, _, _ = SurvivalHUD.crafting_layout(width, height)
-        return pygame.Rect(panel.right-134, panel.y+14, 116, 44)
+        return pygame.Rect(panel.right-238, panel.y+14, 220, 48)
 
     def crafting_menu(self, surface, level, width, height):
         surface.fill((5, 15, 13, 230))
         panel, rows, button = self.crafting_layout(width, height)
         self.panel(surface, panel)
-        self.text(surface, 'CRAFTING', panel.centerx, panel.y+20, (248, 221, 122), self.title_font, True)
+        self.text(surface, 'CRAFTING', panel.x+18, panel.y+20, (248, 221, 122), self.title_font, False)
         self.button(surface, self.crafting_close_rect(width, height), 'Close [C]')
         for i, (recipe, rect) in enumerate(zip(RUN_RECIPE_ORDER, rows)):
             self.button(surface, rect, ITEMS[recipe][0], i == level.selected_recipe)
@@ -54,6 +55,8 @@ class SurvivalHUD(TutorialHUD):
             y = self.wrapped(surface, f'{ITEMS[item][0]}: {level.inventory.count(item)} / {count}',
                              button.x, y, button.width, (143, 223, 166) if level.inventory.has(item, count) else (255, 174, 110))
             y += 10
+        if self.small_font.size(reason)[0]>button.width:
+            reason='Need materials' if reason.startswith('Need ') else 'Already owned' if reason.startswith('Already ') else reason
         self.wrapped(surface, reason, button.x, y+14, button.width, font=self.small_font)
         self.button(surface, button, 'Craft [Enter]' if ready else 'Not ready', enabled=ready)
         self.text(surface, '[Up/Down] choose | [C]/[Esc] back', panel.centerx, panel.bottom-30,
@@ -83,24 +86,19 @@ class SurvivalHUD(TutorialHUD):
         self.text(surface, heading, width//2, 32, (248, 221, 122), self.title_font, True)
         self.text(surface, f'Time {level.elapsed:.1f}s | Defeated {level.stats["defeated"]} | Trees {level.stats["trees"]}',
                   width//2, 68, font=self.small_font, center=True)
-        self.text(surface,f'{level.config.difficulty} / {level.config.length}',width//2,88,font=self.slot_font,center=True)
+        self.text(surface,f'{level.config.difficulty} / {level.config.length}',width//2,72+self.small_font.size('A')[1],font=self.slot_font,center=True)
         column = (panel.width-48)//2
-        per_column = (len(CONTROLS)+1)//2
-        step = max(28, self.small_font.size('A')[1]+5)
-        for i, line in enumerate(CONTROLS):
-            self.wrapped(surface, line, panel.x+16+(i//per_column)*(column+16), 108+(i%per_column)*step,
-                         column, font=self.small_font)
+        tips = ('WASD: move','Mouse: look','Shift: sprint',
+                'F: use | C: craft','Hold E: use','Left click: attack')
+        for i,line in enumerate(tips):
+            self.wrapped(surface,line,panel.x+16+(i//3)*(column+16),150+(i%3)*64,
+                         column,font=self.small_font)
         for rect, label in zip(rows, ('Resume [H / Enter]' if level.active else 'New run [R]',
                                       'Controls', 'Return to main menu', 'Exit game')):
             self.button(surface, rect, label)
 
-    def controls_overlay(self, surface, width, height):
-        surface.fill((5, 15, 13, 245))
-        self.panel(surface, (16, 16, width-32, height-32))
-        self.text(surface, 'CONTROLS', width//2, 32, (248, 221, 122), self.title_font, True)
-        for i, line in enumerate(CONTROLS):
-            self.text(surface, line, 40, 82+i*min(self.small_font.size('A')[1]+8, (height-150)//len(CONTROLS)), font=self.small_font)
-        self.text(surface, '[H] / [Esc]: back to pause menu', width//2, height-45, font=self.small_font, center=True)
+    def controls_overlay(self,surface,width,height):
+        self.controls_list(surface,CONTROLS,width,height,'[H] / [Esc]: back to pause')
 
     def selected_text(self, level):
         item = level.inventory.selected_item
@@ -111,12 +109,14 @@ class SurvivalHUD(TutorialHUD):
             hint = level.attack_status()[1]
         elif item in ('food', 'water', 'bandage'):
             hint = level.use_status()[1]
+            cells=self.hotbar_layout(*self._font_height)
+            if cells[0].y!=cells[5].y:hint={'food':'Hold [E]: eat','water':'Hold [E]: drink','bandage':'Hold [E]: heal'}[item]
         elif item == 'compass':
             angle, distance, _ = level.compass_guidance()
             hint = f'Beacon {distance:.0f}m '+('ahead' if abs(angle) < .25 else 'right' if angle > 0 else 'left')
         else:
             hint = '[C] crafting'
-        return f'{ITEMS[item][0]} x{count} | {ITEMS[item][1]} | {hint}'
+        return f'{ITEMS[item][0]} x{count} | {hint}'
 
     @staticmethod
     def icon(surface, item, x, y):
@@ -135,38 +135,36 @@ class SurvivalHUD(TutorialHUD):
     def draw(self, level, width, height, fps, paused=False):
         self._fonts(height, width)
         overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        self.panel(overlay, (12, 12, 220, 104))
-        for i, (name, value, maximum, colour) in enumerate((
-                ('Health', level.camera.health, level.camera.max_health, (116, 201, 142)),
-                ('Stamina', level.camera.stamina, level.camera.max_stamina, (115, 173, 207)))):
-            y = 20+i*46
-            text = f'{name} {int(value)}/{int(maximum)}'
-            font = BitmapFont(self.small_font.scale*min(1, 198/self.small_font.size(text)[0]))
-            self.text(overlay, text, 22, y, font=font)
-            pygame.draw.rect(overlay, (42, 57, 47), (22, y+27, 198, 8))
-            pygame.draw.rect(overlay, colour, (22, y+27, round(198*max(0, value)/maximum), 8))
-        if level.health_flash_timer:
-            pygame.draw.rect(overlay, (120, 239, 156) if level.health_feedback == 'heal' else (255, 116, 101),
-                             (12, 12, 220, 104), 3, border_radius=9)
+        vitals=self.vitals_panel(overlay,level)
         nearest = level.dog
-        if nearest and nearest.state != 'idle' and nearest.distance_to(level.camera.x, level.camera.z) < 12:
-            rect = pygame.Rect(width-200, 12, 188, 75)
-            self.panel(overlay, rect)
-            self.text(overlay, 'Giant spider' if nearest.kind == 'spider' else 'Hostile dog', rect.x+10, 22, font=self.small_font)
-            self.text(overlay, f'{nearest.health}/{nearest.max_health} health', rect.x+10, 48, font=self.small_font)
+        visible_threat = (nearest and nearest.visible and nearest.health>0 and nearest.state not in ('idle','patrol','concealed','dormant')
+                          and nearest.distance_to(level.camera.x,level.camera.z)<(38 if nearest.kind=='boss' else 12)
+                          and level.world.vision_clear((level.camera.x,level.camera.y,level.camera.z),
+                                                       (nearest.x,nearest.y+.8,nearest.z)))
+        if visible_threat:
+            threat_width=max(220,self.small_font.size('Venom Runner')[0]+24)
+            rect=pygame.Rect(width-threat_width-12,12,threat_width,16+2*(self.small_font.size('A')[1]+4))
+            self.panel(overlay,rect)
+            name={'spider':'Spider','dog':'Dog','viper':'Venom Runner','boss':'Demon Thing'}[nearest.kind]
+            self.text(overlay,name,rect.x+10,20,font=self.small_font)
+            self.text(overlay,f'{nearest.health}/{nearest.max_health} HP',rect.x+10,24+self.small_font.size('A')[1],font=self.small_font)
+            if nearest.kind=='boss':
+                label={'slam':'Red ring: get out','cleave':'Claw: break reach','recover':'Recovery: strike!'}.get(nearest.state,'Watch its windup')
+                cue_y=28+2*self.small_font.size('A')[1]
+                cue_height=len(self.lines(label,rect.width-20,self.slot_font))*(self.slot_font.size('A')[1]+4)
+                rect.height=cue_y+cue_height-rect.y+8
+                self.panel(overlay,rect)
+                self.text(overlay,name,rect.x+10,20,font=self.small_font)
+                self.text(overlay,f'{nearest.health}/{nearest.max_health} HP',rect.x+10,24+self.small_font.size('A')[1],font=self.small_font)
+                self.wrapped(overlay,label,rect.x+10,cue_y,rect.width-20,font=self.slot_font)
+        info_bottom=max(vitals.bottom,rect.bottom if visible_threat else vitals.bottom)
         cells = self.hotbar_layout(width, height)
+        compact=cells[0].y!=cells[5].y
         names = {'food':'Food', 'water':'Water', 'metal_scrap':'Metal', 'plastic_scrap':'Plastic',
                  'stick':'Stick', 'rock':'Stone', 'compass':'Compass', 'spear':'Spear', 'axe':'Axe', 'leaves':'Leaves', 'bandage':'Bandage'}
-        for i, rect in enumerate(cells):
-            self.panel(overlay, rect, level.inventory.selected_slot == i)
-            self.text(overlay, f'[{i+1 if i < 9 else 0}]', rect.x+5, rect.y+2, font=self.slot_font)
-            slot = level.inventory.slots[i] if i < 9 else None
-            if slot:
-                item, count = slot
-                self.icon(overlay, item, rect.centerx, rect.y+34)
-                self.text(overlay, names[item], rect.centerx, rect.y+52, font=self.slot_font, center=True)
-                if count > 1 or ITEMS[item][1] == 'Material':
-                    self.text(overlay, str(count), rect.right-20, rect.y+2, font=self.slot_font)
+        for i,rect in enumerate(cells):
+            self.panel(overlay,rect,level.inventory.selected_slot==i)
+            self.slot_contents(overlay,rect,i,level.inventory.slots[i] if i<9 else None,names)
         selected = self.selected_text(level)
         y = cells[0].top-16-len(self.lines(selected, width-56, self.small_font))*(self.small_font.size('A')[1]+4)
         self.panel(overlay, (16, y, width-32, cells[0].top-y-8))
@@ -177,19 +175,30 @@ class SurvivalHUD(TutorialHUD):
             self.text(overlay,'Linking beacon... stay close',width//2,height//2+45,
                       (131,230,211),self.small_font,True)
         hint = 'Press [H] to pause or show controls'
-        hint_font = BitmapFont(self.small_font.scale*min(1, 18/self.small_font.size('A')[1]))
-        self.panel(overlay, (width-hint_font.size(hint)[0]-24, height-31, hint_font.size(hint)[0]+16, 26))
-        self.text(overlay, hint, width-16-hint_font.size(hint)[0], height-27, font=hint_font)
-        self.text(overlay, f'{level.elapsed:.1f}s', 12, height-27, font=hint_font)
-        objective = 'Objective: reach northern beacon'
-        objective_font = BitmapFont(self.small_font.scale*min(1,(width-32)/self.small_font.size(objective)[0]))
-        self.text(overlay,objective,12,124,font=objective_font)
-        if level.notification_timer > 0:
-            toast_width = min(440, max(168, width-480))
-            lines = self.lines(level.notification, toast_width-20, self.small_font)
-            toast_height = 12+len(lines)*(self.small_font.size('A')[1]+4)
-            self.panel(overlay, ((width-toast_width)//2, 12, toast_width, toast_height))
-            self.wrapped(overlay, level.notification, width//2, 18, toast_width-20, font=self.small_font, center=True)
+        hint_font = self.small_font
+        self.panel(overlay, (width-hint_font.size(hint)[0]-24, height-hint_font.size('A')[1]-8, hint_font.size(hint)[0]+16, hint_font.size('A')[1]+4))
+        self.text(overlay, hint, width-16-hint_font.size(hint)[0], height-hint_font.size('A')[1]-6, font=hint_font)
+        timer=f'{level.elapsed:.1f}s'
+        if hint_font.size(hint)[0]+hint_font.size(timer)[0]+48<=width:
+            self.text(overlay,timer,12,height-hint_font.size('A')[1]-6,font=hint_font)
+        else:
+            self.text(overlay,timer,12,vitals.bottom+4,font=hint_font)
+            info_bottom=max(info_bottom,vitals.bottom+hint_font.size('A')[1]+8)
+        if not visible_threat and not level.poison.active and level.notification_timer<=0:
+            self.wrapped(overlay,level.objective_text,vitals.right+16,18,width-vitals.right-28,font=self.small_font)
+        if level.poison.active:
+            rect=pygame.Rect(12,info_bottom+8,min(640,width-24),self.small_font.size('A')[1]+18)
+            self.panel(overlay,rect)
+            pygame.draw.rect(overlay,(201,107,228),rect,2,border_radius=8)
+            self.text(overlay,'POISONED | Drink water [E] to cure',22,rect.y+8,(231,176,247),self.small_font)
+            info_bottom=rect.bottom
+        if level.notification_timer>0 and not (compact and (level.poison.active or (visible_threat and nearest.kind=='boss'))):
+            toast_width=min(760,width-32)
+            lines=self.lines(level.notification,toast_width-20,self.small_font)
+            toast_height=12+len(lines)*(self.small_font.size('A')[1]+4)
+            toast=pygame.Rect((width-toast_width)//2,info_bottom+10,toast_width,toast_height)
+            self.panel(overlay,toast)
+            self.wrapped(overlay,level.notification,width//2,toast.y+6,toast_width-20,font=self.small_font,center=True)
         if level.active and not paused and not level.crafting_open and not level.help_open:
             prompt_info = self.prompt_rect(level, width, height, y)
             if prompt_info:
@@ -201,6 +210,8 @@ class SurvivalHUD(TutorialHUD):
                              font=self.small_font, center=True)
             pygame.draw.line(overlay, (241, 236, 211), (width//2-5, height//2), (width//2+5, height//2))
             pygame.draw.line(overlay, (241, 236, 211), (width//2, height//2-5), (width//2, height//2+5))
+        if level.active and not (paused or level.crafting_open or level.help_open):
+            self.damage_indicator(overlay,level,width,height)
         if level.crafting_open:
             self.crafting_menu(overlay, level, width, height)
         if paused or not level.active:

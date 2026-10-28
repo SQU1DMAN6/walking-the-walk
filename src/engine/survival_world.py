@@ -2,49 +2,9 @@ import math
 import random
 
 from engine.guidance import PathGuide
-from engine.paths import PathNetwork, curve, segment_distance
-from engine.run_config import LENGTHS
-from engine.streaming import ForestStreaming, chunk_key, TreeSite
-
-
-class SurvivalPaths(PathNetwork):
-    def __init__(self, seed, config):
-        rng = random.Random(seed)
-        width, depth, forks = LENGTHS[config.length]
-        self.route, self.branches, self.shortcuts, self.detours, self.dead_ends = [], [], [], [], []
-        south, step = depth/2-7, (depth-14)/forks
-        junctions = [(rng.uniform(-2, 2), south-i*step) for i in range(forks+1)]
-        for i, (a, b) in enumerate(zip(junctions, junctions[1:])):
-            side = (-1 if i % 2 else 1)*width*rng.uniform(.31,.37)
-            detour = curve([a, (side, a[1]-step*.25), (side+rng.uniform(-2, 2), a[1]-step*.72), b])
-            shortcut = curve([a, ((a[0]+b[0])/2+rng.uniform(-1, 1), (a[1]+b[1])/2), b])
-            self.route.extend(detour if not self.route else detour[1:])
-            self.detours.append(detour)
-            self.shortcuts.append(shortcut)
-            self.branches.append(shortcut)
-            anchor = detour[len(detour)//2]
-            end = (anchor[0]+(5 if side > 0 else -5), anchor[1]-rng.uniform(1, 4))
-            dead = curve([anchor, ((anchor[0]+end[0])/2, anchor[1]-1), end])
-            self.dead_ends.append(dead)
-            self.branches.append(dead)
-        self.lengths = [0.0]
-        for a, b in zip(self.route, self.route[1:]):
-            self.lengths.append(self.lengths[-1]+math.dist(a, b))
-        self.segments = [(a, b) for line in [self.route, *self.branches] for a, b in zip(line, line[1:])]
-        self._grid = {}
-        for a, b in self.segments:
-            for ix in range(math.floor(min(a[0], b[0])/8), math.floor(max(a[0], b[0])/8)+1):
-                for iz in range(math.floor(min(a[1], b[1])/8), math.floor(max(a[1], b[1])/8)+1):
-                    self._grid.setdefault((ix, iz), []).append((a, b))
-
-    def nearby_segments(self, x, z):
-        ix, iz = math.floor(x/8), math.floor(z/8)
-        nearby = (segment for dx in (-1, 0, 1) for dz in (-1, 0, 1)
-                  for segment in self._grid.get((ix+dx, iz+dz), ()))
-        return nearby
-
-    def distance(self, x, z):
-        return min((segment_distance(x,z,*s) for s in self.nearby_segments(x,z)),default=16)
+from engine.run_config import ARENA_RADIUS, VENOM
+from engine.routes import SurvivalPaths
+from engine.streaming import ForestStreaming, chunk_key
 
 
 class SurvivalChunk(ForestStreaming):
@@ -52,6 +12,10 @@ class SurvivalChunk(ForestStreaming):
         self.seed,self.config = seed,config
         self.paths = SurvivalPaths(seed,config)
         self.navigator = PathGuide(self.paths)
+        self.arena = self.paths.arena
+        self.ridge_index = {}
+        for point in self.paths.ridges:
+            self.ridge_index.setdefault(chunk_key(*point),[]).append(point)
         self.spawn,self.beacon = self.position(*self.paths.route[0]),self.position(*self.paths.route[-1])
         self.encounter = self.position(*self.paths.at(70))
         self.resources = self._resources()
@@ -60,6 +24,15 @@ class SurvivalChunk(ForestStreaming):
             self.resource_index.setdefault(chunk_key(pos[0],pos[2]),[]).append((kind,pos))
         self.signs = [self.position(*line[4]) for line in self.paths.shortcuts]
         self.hostile_sites = self._hostiles()
+        self.spawn_access = {}
+        points = [p for line in self.paths.shortcuts for p in line]
+        for kind,pos,_ in self.hostile_sites:
+            if kind!='spider':continue
+            a = pos[0],pos[2]
+            b = min(points,key=lambda p:math.dist(a,p))
+            for ix in range(math.floor((min(a[0],b[0])-3)/32),math.floor((max(a[0],b[0])+3)/32)+1):
+                for iz in range(math.floor((min(a[1],b[1])-3)/32),math.floor((max(a[1],b[1])+3)/32)+1):
+                    self.spawn_access.setdefault((ix,iz),[]).append((a,b))
         self._init_streaming()
         self.validation = self.validate()
 
@@ -89,21 +62,42 @@ class SurvivalChunk(ForestStreaming):
         for i, dead in enumerate(self.paths.dead_ends):
             if i % 2 == 0:
                 result.append(('can', self.position(*dead[-1])))
+        # A trail cache before venom territory; the boss isn't a gear lottery.
+        for distance in (length-125,length-70,length-48):
+            add('bottle',max(40,distance))
+        for kind in ('can','can','stick','rock'):
+            add(kind,length-55-rng.uniform(0,7))
         return result
+
+    def is_clearing(self,x,z):
+        return math.dist((x,z),self.arena)<ARENA_RADIUS or math.dist((x,z),self.paths.route[0])<7
 
     def _hostiles(self):
         rng = random.Random(self.seed+1223)
         sites = []
         balance = self.config.balance
         for zone,line in enumerate(self.paths.shortcuts):
-            count = min(6,balance.shortcut_group+zone//3)
-            centre = len(line)//2
+            count = min(5,balance.shortcut_group+zone//3)
             for member in range(count):
-                x,z = line[min(len(line)-5,centre+member*5)]
-                sites.append(('dog' if zone == member == 0 else 'spider',self.position(x,z),'shortcut'))
-        count = max(1,round(self.paths.lengths[-1]/350))*balance.safe_dogs
+                t = .40+member*.075
+                x,z = line[min(len(line)-5,round(t*(len(line)-1)))]
+                before,after = line[max(0,round(t*(len(line)-1))-2)],line[min(len(line)-1,round(t*(len(line)-1))+2)]
+                dx,dz = after[0]-before[0],after[1]-before[1]
+                norm = max(.01,math.hypot(dx,dz))
+                side = (-1 if member%2 else 1)*rng.uniform(4.2,6.0)
+                pos = self.position(x+dz/norm*side,z-dx/norm*side)
+                if math.dist((pos[0],pos[2]),self.paths.route[0])>38 and math.dist((pos[0],pos[2]),self.arena)>24:
+                    sites.append(('spider',pos,'shortcut'))
+            # Venom opportunities are finite, spaced and activated by remaining distance.
+            for t in (.55,.82):
+                x,z = line[round(t*(len(line)-1))]
+                if (math.dist((x,z),self.paths.route[-1])<=VENOM['threshold'][self.config.length]
+                        and math.dist((x,z),self.arena)>23
+                        and all(k!='viper' or math.dist((p[0],p[2]),(x,z))>=VENOM['spacing'] for k,p,_ in sites)):
+                    sites.append(('viper',self.position(x,z),'shortcut'))
+        count = max(1,round(self.paths.lengths[-1]/230))*balance.safe_dogs
         for i in range(count):
-            distance = 65+(i+rng.uniform(.1,.8))*(self.paths.lengths[-1]-100)/count
+            distance = 48+(i+rng.uniform(.1,.8))*(self.paths.lengths[-1]-110)/count
             sites.append(('dog',self.position(*self.paths.at(distance)),'detour'))
         return sites
 
@@ -119,7 +113,10 @@ class SurvivalChunk(ForestStreaming):
         for x,z in self.paths.route[::3]:
             if any(abs(self.height(x+dx,z+dz)-self.height(x,z))>1.12 for dx,dz in ((1,0),(0,1))):
                 raise ValueError('Unwalkable route slope')
-        return dict(connected=True,route_samples=len(self.paths.route),route_length=round(self.paths.lengths[-1],2),
+        self.paths.validate()
+        surface = sum(math.dist(self.position(*a),self.position(*b)) for a,b in zip(self.paths.route,self.paths.route[1:]))
+        return dict(distance_metric='horizontal primary centreline including arena approach',target_distance=self.config.target_distance,
+                    surface_route_length=round(surface,2),arena=self.arena,route_attempts=self.paths.attempts,fallback=self.paths.fallback,physical_ridges=len(self.paths.ridges),connected=True,route_samples=len(self.paths.route),route_length=round(self.paths.lengths[-1],2),
                     destination_distance=round(math.dist(self.spawn,self.beacon),2),shortcuts=len(self.paths.shortcuts),
                     dead_ends=len(self.paths.dead_ends),resources=len(self.resources),hostiles=len(self.hostile_sites),
                     initial_chunks=len(self.chunks),obstacles=len(self.obstacles))

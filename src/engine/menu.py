@@ -80,7 +80,7 @@ class MenuFlow:
     def layout(width, height):
         button_width = min(420, width-64)
         button_height = max(48, min(66, height//11))
-        top = int(height*.43)
+        top = int(height*.43) if height>=600 else 136+round((height-480)*.3)
         buttons = [pygame.Rect((width-button_width)//2, top+i*(button_height+14),
                                button_width, button_height) for i in range(3)]
         back = pygame.Rect((width-button_width)//2, height-button_height-40, button_width, button_height)

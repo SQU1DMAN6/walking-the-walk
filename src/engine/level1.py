@@ -1,3 +1,4 @@
+from engine.feedback import DamageFeedback
 from enum import IntEnum
 import math
 
@@ -84,6 +85,7 @@ class Level1:
         self.notification_timer = 5.0
         self.objective_flash_timer = self.health_flash_timer = 0.0
         self.health_feedback = None
+        self.damage_feedback = DamageFeedback()
         self._prompt_id = None
         self._sprint_blocked = False
         self.interaction_prompt = None
@@ -92,7 +94,7 @@ class Level1:
         self.camera.terrain_height_cb = self.world.height
         self.camera.movement_cb = self.world.move
         self.camera.move_speed = PLAYER_SPEED
-        self.camera.sprint_factor = 1.35
+        self.camera.sprint_factor = 1.6
         self.camera.survival_stamina = False
         self.camera.x, ground, self.camera.z = self.world.spawn
         self.camera.y = ground+self.camera.eye_height
@@ -222,6 +224,17 @@ class Level1:
         self.use_progress = 0.0
         self.use_item = None
         self._use_latched = False
+
+    def receive_damage(self,amount,position=None,source='Hit'):
+        if not self.active or amount<=0:return False
+        self.camera.take_damage(amount)
+        self.health_feedback,self.health_flash_timer = 'damage',.65
+        self.damage_feedback.record(self.camera,position,source)
+        # Getting bitten shouldn't confiscate your water break.
+        if self.camera.health<=0:
+            self.state = Stage.DEAD
+            self.cancel_use()
+        return True
 
     def update_use(self, dt, held):
         item = self.inventory.selected_item
@@ -516,6 +529,7 @@ class Level1:
         self.notification_timer = max(0, self.notification_timer-dt)
         self.objective_flash_timer = max(0, self.objective_flash_timer-dt)
         self.health_flash_timer = max(0, self.health_flash_timer-dt)
+        self.damage_feedback.update(dt)
         self.attack_cooldown_timer = max(0, self.attack_cooldown_timer-dt)
         self.attack_anim_timer = max(0, self.attack_anim_timer-dt)
         x, z, yaw, pitch = self._last_pose
@@ -532,8 +546,7 @@ class Level1:
             if self.dog:
                 damage = self.dog.update(dt, self.camera, self.world)
                 if damage:
-                    self.camera.take_damage(damage)
-                    self.health_feedback, self.health_flash_timer = 'damage', .65
+                    self.receive_damage(damage,self.dog.position,'Dog')
                     self.notify(f'-{damage} health | Back away!', 2)
                     if self.camera.health <= 0:
                         self.state = Stage.DEAD

@@ -4,20 +4,23 @@ from collections import deque
 
 from engine import models
 from engine.entity import Entity
-from engine.perception import WildDog as Dog, AmbushSpider as Spider, SoundEvent
+from engine.perception import WildDog as Dog, AmbushSpider as Spider, Viper, SoundEvent
+from engine.status import PoisonStatus
+from engine.encounters import Demon, BossStage
 from engine.inventory import Inventory
 from engine.items import ITEMS, RECIPES, RUN_RECIPE_ORDER, HEAL_AMOUNT, USE_DURATION, CONSUMED_CONTAINER
 from engine.level1 import Level1, Stage, INTERACTION_RANGE
 from engine.markers import ObjectiveMarker
 from engine.prompts import WorldPrompt
 from engine.run_config import (RunConfig, WEAPONS, TREE_CHOPS, TREE_LEAVES, HEAL_RANGE,
-                               SPAWN_CLEARANCE, DAMAGE_GRACE)
+                               SPAWN_CLEARANCE, DAMAGE_GRACE, PERCEPTION, VENOM, RunSeeds)
 from engine.survival_world import SurvivalChunk
 from engine.streaming import chunk_key
 
 
 LOOT = {'can': {'food': 1}, 'bottle': {'water': 1},
         'stick': {'stick': 1}, 'rock': {'rock': 1}, 'leaves': {'leaves': TREE_LEAVES}}
+HOSTILE_TYPES = {'dog':Dog,'spider':Spider,'viper':Viper}
 
 
 class RunTree(Entity):
@@ -42,10 +45,12 @@ class SurvivalRun(Level1):
     def active(self):
         return self.state not in (Stage.DEAD,Stage.COMPLETE) and self.camera.health>0
 
-    def __init__(self, camera, seed=42, config=None):
-        self.config, self.seed = config or RunConfig(), seed
+    def __init__(self, camera, seed=None, config=None):
+        self._seed_override = seed
+        self._seeds = RunSeeds(seed)
+        self.config, self.seed = config or RunConfig(), self._seeds.next()
         self._ready = False
-        super().__init__(camera, seed, SurvivalChunk(seed, self.config))
+        super().__init__(camera, self.seed, SurvivalChunk(self.seed, self.config))
         self.axe_meshes = models.axe()
         self.held_props.update({'leaves': models.held_prop(models.leaves()),
                                 'bandage': models.held_prop(models.bandage())})
@@ -53,6 +58,7 @@ class SurvivalRun(Level1):
     def reset(self):
         if self._ready:
             self.world.close()
+            if self._seed_override is None:self.seed = self._seeds.next()
             self.world = SurvivalChunk(self.seed, self.config)
         super().reset()
         self._ready = True
@@ -78,16 +84,25 @@ class SurvivalRun(Level1):
         self._noise_timer = 0
         self._previous_position = self.camera.x,self.camera.z
         self.beacon_commit = 0.0
+        self.poison = PoisonStatus()
+        self.next_viper_spawn = 0.
+        self._venom_check = 0.
+        self._simulation_accumulator = 0.
+        self.boss = Demon(self.world.position(*self.world.arena))
+        self.entities.add(self.boss)
+        self.boss_effect_id = None
         self.world.clock,self.world.next_attack = 0.0,0.0
         self.world.sounds = deque(maxlen=32)
         self.world.actors = []
         self.world.player_velocity = (0,0)
         self.world.ambush_cue = None
-        self.world.ai_persistence = {'Easy':6,'Medium':9,'Hard':12}[self.config.difficulty]
+        self.world.ai_persistence = PERCEPTION['persistence'][self.config.difficulty]
         self.world.max_attackers = 2 if self.config.difficulty=='Hard' else 1
         self._resource_meshes = {}
         self.camera.movement_cb = self.move_player
         self._sync_entities()
+        omen = self.world.paths.at(self.world.paths.lengths[-1]-65)
+        self.entities.add(Entity('omen',*self.world.position(omen[0]+2.7,omen[1]),meshes=models.boss_omen()))
         self._update_prompt()
 
     def _sync_entities(self):
@@ -95,7 +110,7 @@ class SurvivalRun(Level1):
         for entity in self.entities.all():
             key = getattr(entity,'world_key',None)
             if key and chunk_key(entity.x,entity.z) not in loaded:
-                if entity.kind in ('dog','spider'):
+                if entity.kind in HOSTILE_TYPES:
                     self.hostile_records[key] = entity.snapshot()
                 elif entity.kind=='tree' and entity.chops:
                     self.tree_chops[key] = entity.chops
@@ -107,8 +122,15 @@ class SurvivalRun(Level1):
             if kind == 'tree':
                 entity = RunTree(site)
                 entity.chops = self.tree_chops.get(key,0)
-            elif kind in ('dog','spider'):
-                entity = (Dog if kind=='dog' else Spider)(position)
+            elif kind in HOSTILE_TYPES:
+                if kind=='viper' and key not in self.hostile_records:
+                    if (self.remaining_distance>VENOM['threshold'][self.config.length]
+                            or self.world.clock<self.next_viper_spawn
+                            or len(self.entities.of_kind('viper'))>=VENOM['population'][self.config.difficulty]
+                            or math.hypot(position[0]-self.camera.x,position[2]-self.camera.z)<SPAWN_CLEARANCE):
+                        return
+                    self.next_viper_spawn = self.world.clock+VENOM['spawn_interval'][self.config.difficulty]
+                entity = HOSTILE_TYPES[kind](position)
                 saved = key in self.hostile_records
                 if saved:
                     entity.__dict__.update(self.hostile_records.pop(key))
@@ -118,7 +140,8 @@ class SurvivalRun(Level1):
                     if candidates:
                         tree = min(candidates,key=lambda t:math.dist(t.position,position))
                         x,z = tree.position[0]+tree.obstacle.radius+.7,tree.position[2]
-                        if self.world.is_walkable(x,z,.45) and all(e.distance_to(x,z)>1.3 for e in self.hostiles):
+                        if (self.world.is_walkable(x,z,.45) and all(e.distance_to(x,z)>1.3 for e in self.hostiles)
+                                and self.world.line_clear(x,z,position[0],position[2],.45)):
                             entity.x,entity.z = x,z
                             entity.home = x,z
                             entity.ambush_height = 2.8
@@ -182,14 +205,14 @@ class SurvivalRun(Level1):
         for _ in range(steps):
             nx,nz = self.world.move(x,z,dx/steps,dz/steps,radius)
             for enemy in self.hostiles:
-                if enemy.state in ('concealed','ambush'):
+                if enemy.state in ('concealed','ambush','dormant','emerging'):
                     continue
                 minimum = radius+enemy.radius+.04
                 if math.hypot(nx-enemy.x,nz-enemy.z)<minimum and math.hypot(nx-enemy.x,nz-enemy.z)<math.hypot(x-enemy.x,z-enemy.z):
                     alternatives = ((nx,z),(x,nz))
                     nx,nz = next(((a,b) for a,b in alternatives if math.hypot(a-enemy.x,b-enemy.z)>=minimum
                                   and self.world.is_walkable(a,b,radius)),(x,z))
-            if any(e.state not in ('concealed','ambush') and math.hypot(nx-e.x,nz-e.z)<radius+e.radius+.04
+            if any(e.state not in ('concealed','ambush','dormant','emerging') and math.hypot(nx-e.x,nz-e.z)<radius+e.radius+.04
                    and math.hypot(nx-e.x,nz-e.z)<math.hypot(x-e.x,z-e.z) for e in self.hostiles):
                 nx,nz = x,z
             x,z = nx,nz
@@ -201,7 +224,18 @@ class SurvivalRun(Level1):
 
     @property
     def hostiles(self):
-        return self.entities.of_kind('dog', 'spider')
+        return self.entities.of_kind(*HOSTILE_TYPES,'boss')
+
+    @property
+    def remaining_distance(self):
+        return math.hypot(self.camera.x-self.world.beacon[0],self.camera.z-self.world.beacon[2])
+
+    @property
+    def objective_text(self):
+        if self.boss.encounter==BossStage.DEFEATED:return 'Beacon unlocked: enter the ring and press [F]'
+        if self.boss.encounter==BossStage.ACTIVE:return 'Defeat the Demon | punish its recovery'
+        if self.boss.encounter==BossStage.EMERGING:return 'The Demon is waking. Get ready.'
+        return 'Find the northern clearing | watch the route signs'
 
     @property
     def dog(self):
@@ -272,7 +306,8 @@ class SurvivalRun(Level1):
             return False, 'Select food, water or a bandage'
         if self.camera.health >= self.camera.max_health and item=='bandage':
             return False, 'Health already full'
-        return True, 'Hold [E]: heal 20-35' if item == 'bandage' else 'Hold [E]: +10 health, then scrap'
+        return True, ('Hold [E]: heal 20-35' if item=='bandage' else
+                      f"Hold [E]: +10 health, +{VENOM['water_stamina']:g} stamina, cure poison" if item=='water' else 'Hold [E]: +10 health, then scrap')
 
     @staticmethod
     def loot(target):
@@ -316,8 +351,14 @@ class SurvivalRun(Level1):
         amount = self.health_rng.randint(*HEAL_RANGE) if item == 'bandage' else HEAL_AMOUNT
         before = self.camera.health
         self.camera.health = min(self.camera.max_health, before+amount)
+        extra = ''
+        if item=='water':
+            stamina_before = self.camera.stamina
+            self.camera.stamina = min(self.camera.max_stamina,self.camera.stamina+VENOM['water_stamina'])
+            cured = self.poison.cure()
+            extra = f' | +{int(self.camera.stamina-stamina_before)} stamina'+(' | Poison cured' if cured else '')
         self.health_feedback, self.health_flash_timer = 'heal', .65
-        self.notify(f'+{int(self.camera.health-before)} health'+(f' | +1 {ITEMS[scrap][0]}' if scrap else ''))
+        self.notify(f'+{int(self.camera.health-before)} health'+extra+(f' | +1 {ITEMS[scrap][0]}' if scrap else ''))
         return True
 
     def interaction_target(self):
@@ -366,6 +407,9 @@ class SurvivalRun(Level1):
             elif target.kind == 'sign':
                 title, text = 'Dangerous shortcut', 'Press [F] to read sign'
             elif target.kind == 'beacon':
+                if self.boss.encounter!=BossStage.DEFEATED:
+                    return WorldPrompt(target.id,'Beacon sealed','Defeat the Demon first',
+                                       (target.x,target.y+1.2,target.z),False)
                 title = 'Northern beacon'
                 text = 'Linking... stay in the ring' if self.beacon_commit>0 else 'Press [F] to finish run'
             else:
@@ -378,7 +422,7 @@ class SurvivalRun(Level1):
             return WorldPrompt(target.id, title, text, (target.x, target.y+target.visual_height+.2, target.z), True)
         target = self.attack_target()
         if target and self.attack_status()[0]:
-            return WorldPrompt(target.id, 'Giant spider' if target.kind == 'spider' else 'Hostile dog',
+            return WorldPrompt(target.id, {'spider':'Giant spider','dog':'Hostile dog','viper':'Venom runner','boss':'Demon Thing'}[target.kind],
                                'Left click to attack', (target.x, target.y+target.visual_height+.2, target.z), True)
         return None
 
@@ -390,7 +434,8 @@ class SurvivalRun(Level1):
             self.notify('Nothing in reach')
             return False
         if target.kind == 'beacon':
-            if self.camera.health<=0:
+            if self.camera.health<=0 or self.boss.encounter!=BossStage.DEFEATED:
+                self.notify('Beacon sealed. Defeat the Demon Thing first.',3)
                 return False
             if self.beacon_commit<=0:
                 self.beacon_commit = .8
@@ -424,6 +469,7 @@ class SurvivalRun(Level1):
             return None
         choices = []
         for target in self.hostiles:
+            if target.kind=='boss' and target.encounter!=BossStage.ACTIVE:continue
             distance = target.distance_to(self.camera.x, self.camera.z)
             pitch = math.atan2(self.camera.y-target.y-.6, max(distance, .01))
             if (distance <= weapon['range'] and self._facing(target) >= math.cos(math.radians(45))
@@ -442,7 +488,7 @@ class SurvivalRun(Level1):
         self.attack_cooldown_timer = weapon['cooldown']
         self.attack_anim_timer = weapon['animation']
         self.cancel_use()
-        self.sound('fight',18)
+        self.sound('fight',PERCEPTION['fight_noise'])
         return True
 
     def handle_attack(self):
@@ -450,12 +496,16 @@ class SurvivalRun(Level1):
             return False
         target = self.attack_target()
         if target:
-            target.health = max(0, target.health-WEAPONS[self.inventory.selected_item]['damage'])
-            self.notify(f'Hit landed | {target.kind}: {target.health} health')
+            damage = WEAPONS[self.inventory.selected_item]['damage']
+            actual = target.receive_hit(damage) if target.kind=='boss' else min(target.health,damage)
+            if target.kind!='boss':target.health = max(0,target.health-actual)
+            self.notify(f'Hit: {actual} | {target.kind}: {target.health} health'+
+                        (' | Guarded; wait for recovery' if actual<damage and target.health>0 else ''))
             if target.health <= 0:
                 self.mark_removed(target)
                 self.stats['defeated'] += 1
                 self.notify(target.kind.title()+' defeated')
+                if target.kind=='boss':self.notify('The Demon thing has been defeated. The beacon is yours.',6)
         return True
 
     def chop(self, target):
@@ -470,7 +520,7 @@ class SurvivalRun(Level1):
             return False
         target.chops += 1
         if key:self.tree_chops[key] = target.chops
-        self.sound('chop',26)
+        self.sound('chop',PERCEPTION['chop_noise'])
         self.notify(f'Chop {target.chops}/{TREE_CHOPS}')
         if target.chops >= TREE_CHOPS:
             self.tree_chops.pop(getattr(target,'world_key',None),None)
@@ -492,7 +542,8 @@ class SurvivalRun(Level1):
 
     @property
     def north_progress(self):
-        return max(0, min(1, (self.world.spawn[2]-self.camera.z)/(self.world.spawn[2]-self.world.beacon[2])))
+        total = math.hypot(self.world.spawn[0]-self.world.beacon[0],self.world.spawn[2]-self.world.beacon[2])
+        return max(0,min(1,1-self.remaining_distance/max(1,total)))
 
     def _emerge(self, dt):
         balance = self.config.balance
@@ -508,6 +559,7 @@ class SurvivalRun(Level1):
                       for point in line
                       if SPAWN_CLEARANCE <= math.hypot(point[0]-self.camera.x, point[1]-self.camera.z) <= 24
                       and self.world.is_walkable(*point, .45)
+                      and math.dist(point,self.world.arena)>26
                       and all(e.distance_to(*point)>4 for e in self.hostiles)]
         if not candidates:
             return
@@ -519,7 +571,44 @@ class SurvivalRun(Level1):
         self.reinforcements += 1
         self.pressure = 0
 
-    def update(self, dt):
+    def update(self,dt):
+        if self.camera.health<=0 and self.state!=Stage.COMPLETE:
+            self.state = Stage.DEAD
+            self.cancel_use()
+        if not self.active or self.crafting_open or self.help_open:return
+        self._simulation_accumulator += max(0,min(.25,dt))
+        while self._simulation_accumulator+1e-9>=1/60:
+            self._simulation_accumulator -= 1/60
+            self._step(1/60)
+            if not self.active:break
+
+    def _damage_player(self,amount,source,position=None):
+        if not self.active or amount<=0:return
+        self.receive_damage(amount,position,source)
+        self.beacon_commit = 0
+        self.notify(f'-{amount} health | {source}')
+
+    def _boss_feedback(self):
+        while self.boss.events:
+            event = self.boss.events.pop(0)
+            text = {'emerging':'The clearing went quiet. The Demon is rising.',
+                    'cleave':'Demon: claw sweep! Break its reach.',
+                    'slam':'Demon: red ground! Change direction and get out.',
+                    'phase_two':'The Demon is furious. Watch its recovery.',
+                    'defeated':'The demon has been defeated and the Beacon unlocked.'}[event]
+            self.notify(text,3)
+        effect = self.entities.get(self.boss_effect_id)
+        if self.boss.telegraph:
+            position,meshes = self.boss.telegraph
+            if effect:
+                effect.x,effect.y,effect.z = position
+                effect.meshes = meshes
+            else:self.boss_effect_id = self.entities.add(Entity('telegraph',*position,meshes=meshes))
+        elif effect:
+            self.entities.remove(effect.id)
+            self.boss_effect_id = None
+
+    def _step(self, dt):
         if self.camera.health<=0 and self.state!=Stage.COMPLETE:
             self.state = Stage.DEAD
             self.cancel_use()
@@ -531,12 +620,19 @@ class SurvivalRun(Level1):
             self.state = Stage.DEAD
             self.cancel_use()
             return
-        self.world.update_stream(self.camera.x,self.camera.z,self.camera.forward_vec())
+        self.world.pinned_chunks = {chunk_key(e.x,e.z) for e in self.hostiles
+                                    if e.state in ('pursue','flank','attack','recover','investigate','search','cleave','slam')
+                                    and e.distance_to(self.camera.x,self.camera.z)<PERCEPTION['encounter_leash']}
+        delta = self.camera.x-self._previous_position[0],self.camera.z-self._previous_position[1]
+        norm = math.hypot(*delta)
+        direction = (delta[0]/norm,delta[1]/norm) if norm>.001 else self.camera.forward_vec()
+        self.world.update_stream(self.camera.x,self.camera.z,direction)
         if self.world.stream_error != self._last_stream_error:
             self._last_stream_error = self.world.stream_error
             self.notify('Forest loading hit a snag. Pause and start a new run.',8)
         if self._stream_revision != self.world.render_revision:
             self._sync_entities()
+        self.damage_feedback.update(dt)
         self.world.clock += dt
         self.world.actors = self.hostiles
         current = self.camera.x,self.camera.z
@@ -545,7 +641,7 @@ class SurvivalRun(Level1):
         self._previous_position = current
         self._noise_timer -= dt
         if travelled>.002 and self._noise_timer<=0:
-            self.sound('sprint' if self.camera.sprinting else 'walk',14 if self.camera.sprinting else 5)
+            self.sound('sprint' if self.camera.sprinting else 'walk',PERCEPTION['sprint_noise'] if self.camera.sprinting else PERCEPTION['walk_noise'])
             self._noise_timer = .35 if self.camera.sprinting else .55
         while self.world.sounds and self.world.sounds[0].expires<self.world.clock:
             self.world.sounds.popleft()
@@ -553,28 +649,31 @@ class SurvivalRun(Level1):
         for name in ('notification_timer', 'health_flash_timer', 'attack_cooldown_timer', 'attack_anim_timer', 'damage_grace'):
             setattr(self, name, max(0, getattr(self, name)-dt))
         self._emerge(dt)
+        if self.world.clock>=self.next_viper_spawn and self.world.clock>=self._venom_check:
+            self._venom_check = self.world.clock+1
+            if self.remaining_distance<=VENOM['threshold'][self.config.length]:self._sync_entities()
+        poison_damage = self.poison.update(dt)
+        if poison_damage:self._damage_player(poison_damage,'Poison')
+        if not self.active:return
         for enemy in self.hostiles:
             enemy.detection = type(enemy).detection*(1+self.config.balance.aggression_gain*self.north_progress)
             enemy.alert_duration = {'Easy':.6,'Medium':.4,'Hard':.3}[self.config.difficulty]
             damage = enemy.update(dt, self.camera, self.world)
             if damage and self.damage_grace <= 0:
-                self.camera.take_damage(damage)
                 self.damage_grace = DAMAGE_GRACE
-                self.health_feedback, self.health_flash_timer = 'damage', .65
-                self.cancel_use()
-                self.beacon_commit = 0
-                self.notify(f'-{damage} health')
-                if self.camera.health <= 0:
-                    self.state = Stage.DEAD
-                    self.cancel_use()
-                    break
+                self._damage_player(damage,'Demon' if enemy.kind=='boss' else enemy.kind.title(),enemy.position)
+                if enemy.kind=='viper':
+                    self.poison.apply()
+                    self.notify(f'-{damage} health | Poisoned! Drink water to cure.',4)
+                if not self.active:break
+        self._boss_feedback()
         if self.world.ambush_cue:
             if math.dist((self.camera.x,self.camera.z),(self.world.ambush_cue[0],self.world.ambush_cue[2]))<14:
                 self.notify('Skittering overhead. Heads up.',2)
             self.world.ambush_cue = None
         if self.beacon_commit>0 and self.active:
             beacon = self.entities.get(self.beacon_id)
-            if beacon.distance_to(self.camera.x,self.camera.z)>INTERACTION_RANGE:
+            if beacon.distance_to(self.camera.x,self.camera.z)>INTERACTION_RANGE or self.boss.encounter!=BossStage.DEFEATED:
                 self.beacon_commit = 0
             else:
                 self.beacon_commit -= dt

@@ -8,6 +8,7 @@ import time
 from engine.chunk import Obstacle, TutorialChunk
 from engine.mesh import Mesh
 from engine.models import lathe, rock
+from engine.run_config import RIDGE_RADIUS, ARENA_RADIUS
 from engine.paths import segment_distance
 from engine.worldgen import create_branch, create_spinifex
 
@@ -50,6 +51,7 @@ class ForestStreaming:
 
     def _init_streaming(self):
         self.chunks, self.pending = {}, {}
+        self.pinned_chunks = set()
         self.removed_trees = set()
         self._executor = None
         self._closed = False
@@ -69,7 +71,7 @@ class ForestStreaming:
                 for dx in range(-LOAD_RADIUS, LOAD_RADIUS+1)]
 
     def height(self, x, z):
-        phase = self.seed*.731
+        phase = (self.seed%104729)*.731
         ridge = 6*math.sin(x*.026+phase)*math.cos(z*.017+phase*.3)
         hills = 3*math.sin(z*.052+phase)+1.1*math.sin(x*.13+z*.045+phase)
         channel = 22*math.sin(z*.019+phase)
@@ -80,9 +82,10 @@ class ForestStreaming:
         return x, self.height(x, z), z
 
     def _density(self, x, z):
-        return .5+.28*math.sin(x*.041+self.seed)*math.cos(z*.036-self.seed*.2)+.2*math.sin(z*.071+x*.02)
+        seed = self.seed%65521
+        return .5+.28*math.sin(x*.041+seed)*math.cos(z*.036-seed*.2)+.2*math.sin(z*.071+x*.02)
 
-    def generate_chunk(self, key):
+    def generate_chunk(self, key, safe_fallback=False):
         started = time.perf_counter()
         cx, cz = key
         rng = random.Random((self.seed*73856093 ^ cx*19349663 ^ cz*83492791) & 0xffffffffffffffff)
@@ -104,10 +107,23 @@ class ForestStreaming:
                 a = iz*(n+1)+ix
                 faces.extend(((a,a+n+1,a+1),(a+1,a+n+1,a+n+2)))
         chunk.meshes.append(Mesh(vertices,faces,(70,91,47),(0,0,0),vertex_colours=colours))
-        for index in range(80):
+        protected = [(p[0],p[2]) for _,p,_ in getattr(self,'hostile_sites',())
+                     if minx-10<p[0]<minx+42 and minz-10<p[2]<minz+42]
+        def clearing(x,z,radius=0):
+            return (getattr(self,'is_clearing',lambda x,z:False)(x,z)
+                    or any(math.hypot(x-px,z-pz)<radius+1.1 for px,pz in protected)
+                    or any(segment_distance(x,z,a,b)<radius+.7 for a,b in getattr(self,'spawn_access',{}).get(key,())))
+        for x,z in (() if safe_fallback else getattr(self,'ridge_index',{}).get(key,())):
+            if clearing(x,z,RIDGE_RADIUS):continue
+            mesh = lathe([(0,RIDGE_RADIUS),(1.5,RIDGE_RADIUS),(2.7,.8),(3.2,0)],(83,86,75),10)
+            mesh.position = self.position(x,z)
+            chunk.meshes.append(mesh)
+            chunk.obstacles.append(Obstacle(x,z,RIDGE_RADIUS,'ridge'))
+            chunk.details.append(('ridge',x,z,False))
+        for index in range(0 if safe_fallback else 80):
             x, z = minx+rng.uniform(1,31), minz+rng.uniform(1,31)
             density = self._density(x,z)
-            if rng.random() > density*.85 or self.paths.distance(x,z) < self.paths.half_width+1:
+            if rng.random() > density*.85 or self.paths.distance(x,z) < self.paths.half_width+1 or clearing(x,z,1):
                 continue
             if any(math.hypot(x-o.x,z-o.z) < 1.7 for o in chunk.obstacles):
                 continue
@@ -128,7 +144,7 @@ class ForestStreaming:
             chunk.details.append(('tree',x,z,False))
         for index in range(130):
             x, z = minx+rng.random()*32, minz+rng.random()*32
-            if self.paths.distance(x,z) < self.paths.half_width+.3 or rng.random() > self._density(x,z):
+            if self.paths.distance(x,z) < self.paths.half_width+.3 or rng.random() > self._density(x,z) or clearing(x,z):
                 continue
             mesh = create_spinifex(self.position(x,z),self.seed+index+cx*371+cz*761)
             mesh.colour = (43,111,58)
@@ -136,9 +152,9 @@ class ForestStreaming:
             chunk.details.append(('fern',x,z,False))
         for index in range(13):
             x,z = minx+rng.random()*32,minz+rng.random()*32
-            big = index < 3
+            big = index < 3 and not safe_fallback
             radius = rng.uniform(.65,1.15) if big else .12
-            if big and self.paths.distance(x,z) < self.paths.half_width+radius+.6:
+            if clearing(x,z,radius) or (big and self.paths.distance(x,z) < self.paths.half_width+radius+.6):
                 continue
             mesh = rock(rng.randrange(100000))[0]
             scale = radius/.39 if big else .38
@@ -151,13 +167,19 @@ class ForestStreaming:
             chunk.details.append(('boulder' if big else 'pebble',x,z,False))
         for _ in range(3):
             x,z = minx+rng.random()*32,minz+rng.random()*32
-            if self.paths.distance(x,z) < self.paths.half_width+2:
+            if self.paths.distance(x,z) < self.paths.half_width+2 or clearing(x,z):
                 continue
             y = self.height(x,z)+.12
             end = x+rng.uniform(1,3), z+rng.uniform(1,3)
             # Roots are ankle height. The forest doesn't need invisible walls.
             chunk.meshes.append(create_branch((x,y,z),(end[0],self.height(*end)+.12,end[1]),.16,(91,66,40)))
-        self._validate_chunk(chunk)
+        try:self._validate_chunk(chunk)
+        except ValueError as error:
+            if safe_fallback:raise
+            print(json.dumps(dict(event='chunk_fallback',seed=self.seed,chunk=key,error=str(error))),flush=True)
+            fallback = self.generate_chunk(key,safe_fallback=True)
+            fallback.generation_ms = (time.perf_counter()-started)*1000
+            return fallback
         from engine.opengl_renderer import pack_meshes
         chunk.packed = pack_meshes(chunk.meshes)
         chunk.generation_ms = (time.perf_counter()-started)*1000
@@ -170,6 +192,9 @@ class ForestStreaming:
         for kind, pos in self.resource_index.get(chunk.key, ()):
             if any(math.hypot(pos[0]-o.x,pos[2]-o.z)<o.radius+.4 for o in chunk.obstacles):
                 raise ValueError(f'Blocked {kind} in chunk {chunk.key}')
+        for kind,pos,_ in getattr(self,'hostile_sites',()):
+            if chunk_key(pos[0],pos[2])==chunk.key and any(math.hypot(pos[0]-o.x,pos[2]-o.z)<o.radius+.5 for o in chunk.obstacles):
+                raise ValueError(f'Blocked hostile {kind} in chunk {chunk.key}')
 
     def _activate(self, chunk):
         removed = [site for site in chunk.trees if site.key in self.removed_trees]
@@ -191,7 +216,8 @@ class ForestStreaming:
         if self._closed:
             return
         centre = chunk_key(x,z)
-        desired = set(self.desired(centre))
+        pinned = set(sorted(self.pinned_chunks,key=lambda k:math.dist(k,centre))[:8])
+        desired = set(self.desired(centre))|pinned
         for key,future in tuple(self.pending.items()):
             if key not in desired and future.cancel():
                 del self.pending[key]
@@ -208,7 +234,7 @@ class ForestStreaming:
                 break
         distant = sorted(self.chunks,key=lambda k:math.hypot(k[0]-centre[0],k[1]-centre[1]),reverse=True)
         for key in distant:
-            if max(abs(key[0]-centre[0]),abs(key[1]-centre[1])) > LOAD_RADIUS+1 or len(self.chunks)>MAX_CHUNKS:
+            if key not in pinned and (max(abs(key[0]-centre[0]),abs(key[1]-centre[1])) > LOAD_RADIUS+1 or len(self.chunks)>MAX_CHUNKS):
                 del self.chunks[key]
                 self.evictions += 1
                 self.render_revision += 1

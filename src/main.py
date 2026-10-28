@@ -17,6 +17,7 @@ from engine import models
 from engine.menu import MenuFlow, Screen
 from engine.survival import SurvivalRun
 from engine.survival_ui import SurvivalHUD
+from engine.run_config import RunSeeds
 
 
 SKY_COLOUR = (.36, .65, .88)
@@ -89,9 +90,11 @@ def render_scene(renderer, level, batches):
 
 
 class Application:
-    def __init__(self, width, height, seed=42, smoke_test=False):
+    def __init__(self, width, height, seed=None, smoke_test=False):
         self.width, self.height = width, height
-        self.seed, self.smoke_test = seed, smoke_test
+        self.seed,self.smoke_test = seed if seed is not None else 42,smoke_test
+        self.run_seeds = RunSeeds(seed)
+        self.tutorial_seed = self.seed
         self.menu = MenuFlow()
         self.hud = TutorialHUD()
         self.pointer = PointerCapture()
@@ -179,6 +182,16 @@ class Application:
             cached_tutorial = self.level and not self.menu.run_requested and not getattr(self.level, 'is_survival', False)
             if self.menu.screen == Screen.LOADING and previous != Screen.LOADING and not cached_tutorial:
                 self.loading_visible = False
+            if previous==Screen.LOADING and self.menu.screen!=Screen.LOADING and self.loading_future:
+                abandoned = self.loading_future
+                if not abandoned.cancel():
+                    def discard(future):
+                        try:
+                            loaded = future.result()
+                            if hasattr(loaded.world,'close'):loaded.world.close()
+                        except Exception:pass
+                    abandoned.add_done_callback(discard)
+                self.loading_future = None
         elif event.type == pygame.KEYDOWN:
             level = self.level
             if event.key == pygame.K_h:
@@ -274,7 +287,10 @@ class Application:
                     if self.executor is None:
                         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='jungle')
                     # Build the forest off-thread; OpenGL stays on the window thread.
-                    self.loading_signature = signature
+                    self.seed = self.run_seeds.next() if self.menu.run_requested else self.tutorial_seed
+                    self.loading_signature = (self.menu.run_requested,self.seed,self.menu.config)
+                    print(json.dumps(dict(event='generation_requested',seed=self.seed,
+                                          configuration=self.menu.config.__dict__,fixed_seed=self.run_seeds.override is not None)),flush=True)
                     self.loading_future = (self.executor.submit(SurvivalRun, Camera(), self.seed, self.menu.config)
                                            if self.menu.run_requested else self.executor.submit(Level1, Camera(), self.seed))
                 if self.loading_future.done():
@@ -392,7 +408,7 @@ class Application:
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Walking the Walk: CS Jungle')
     parser.add_argument('--windowed', action='store_true', help='Start in a window; fullscreen is the default')
-    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--seed',type=int,default=None,help='Developer override: reproduce this seed; ordinary runs use fresh seeds')
     parser.add_argument('--width', type=int, default=1280)
     parser.add_argument('--height', type=int, default=800)
     parser.add_argument('--smoke-test', action='store_true', help='Log frame health while an external timeout handles the stop')

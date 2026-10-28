@@ -3,7 +3,8 @@ from dataclasses import dataclass
 import math
 
 from engine.entity import Dog, Spider
-from engine.run_config import SURVIVAL_SPIDER
+from engine.run_config import SURVIVAL_SPIDER, PERCEPTION, VENOM
+from engine.combat import attack_hits, turn_towards
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class SoundEvent:
 
 
 class Senses:
-    fov = math.cos(math.radians(65))
+    fov = math.cos(math.radians(PERCEPTION['fov_degrees']/2))
 
     def setup_senses(self):
         self.home = self.x,self.z
@@ -30,6 +31,10 @@ class Senses:
         self.alert_duration = .4
         self.transitions = deque(maxlen=24)
         self.sees_player = False
+        self.attack_heading = self.yaw
+        self._nav_timer = 0.
+        self._nav_target = self.home
+        self._nav_goal = self.home
 
     def transition(self,state):
         if self.state != state:
@@ -41,9 +46,10 @@ class Senses:
         distance = max(.001,math.hypot(dx,dz))
         facing = (dx*math.sin(self.yaw)+dz*math.cos(self.yaw))/distance
         fov = -.15 if self.last_known and self.memory<2 else self.fov
-        clear = distance<=self.detection and world.vision_clear((self.x,self.y+.8,self.z),(camera.x,camera.y-.3,camera.z))
-        self.sees_player = distance<=self.detection and facing>=fov and clear
-        if self.kind == 'spider' and distance<2.8 and clear:
+        detection = self.detection*(1.12 if camera.sprinting else 1)
+        clear = distance<=detection and world.vision_clear((self.x,self.y+.8,self.z),(camera.x,camera.y-.3,camera.z))
+        self.sees_player = distance<=detection and facing>=fov and clear
+        if self.kind in ('spider','viper') and distance<2.8 and clear:
             self.sees_player = True
         if self.sees_player:
             self.last_known,self.memory = (camera.x,camera.z),0.0
@@ -53,25 +59,29 @@ class Senses:
         for sound in events:
             self.last_sound = max(self.last_sound,sound.serial)
             if self.distance_to(*sound.position)<=sound.radius and not self.sees_player:
-                if self.state in ('patrol','idle','search','investigate','suspicious','concealed'):
+                if self.state not in ('defeated',):
                     self.last_known,self.memory = sound.position,0.0
-                    if self.state != 'concealed':
+                    if self.state in ('patrol','idle','search','investigate','suspicious'):
                         self.transition('investigate')
 
-    def _move(self,dt,target,world,camera,speed=None):
-        tx,tz = world.chase_target(self.x,self.z,*target)
+    def _move(self,dt,target,world,camera,speed=None,turn_rate=5):
+        self._nav_timer -= dt
+        if self._nav_timer<=0 or math.dist(target,self._nav_goal)>1.5:
+            self._nav_target = world.chase_target(self.x,self.z,*target)
+            self._nav_goal,self._nav_timer = target,.22
+        tx,tz = self._nav_target
         dx,dz = tx-self.x,tz-self.z
         length = math.hypot(dx,dz)
         if length<.05:
             return
         yaw = math.atan2(dx,dz)
         delta = (yaw-self.yaw+math.pi)%math.tau-math.pi
-        self.yaw += max(-dt*5,min(dt*5,delta))
+        self.yaw += max(-dt*turn_rate,min(dt*turn_rate,delta))
         step = min(length,(self.speed if speed is None else speed)*dt)
         old = self.x,self.z
         nx,nz = world.move(self.x,self.z,dx/length*step,dz/length*step,self.radius)
         bodies = [(camera.x,camera.z,camera.radius)]+[(e.x,e.z,e.radius) for e in world.actors
-                                                   if e is not self and e.state not in ('concealed','ambush')]
+                                                   if e is not self and e.state not in ('concealed','ambush','dormant','emerging')]
         for x,z,radius in bodies:
             minimum = self.radius+radius+.08
             before,after = math.hypot(self.x-x,self.z-z),math.hypot(nx-x,nz-z)
@@ -103,7 +113,7 @@ class Senses:
         self.attack_elapsed = min(self.windup_duration+self.recovery,self.attack_elapsed+dt)
         self.walk_blend *= math.exp(-dt*14)
         if self.sense_timer<=0:
-            self.sense_timer = .12
+            self.sense_timer = PERCEPTION['sense_interval']
             self.perceive(camera,world)
         distance = self.distance_to(camera.x,camera.z)
         if self.state == 'concealed':
@@ -114,7 +124,7 @@ class Senses:
                 world.ambush_cue = self.position
             return 0
         if self.state == 'ambush':
-            t = min(1,self.state_time/.65)
+            t = min(1,self.state_time/PERCEPTION['ambush_seconds'])
             self.y = world.height(self.x,self.z)+self.ambush_height*(1-t*t)
             if t>=1:
                 minimum = self.radius+camera.radius+.15
@@ -133,15 +143,22 @@ class Senses:
                 self.last_known = camera.x,camera.z
             return 0
         if self.state == 'attack':
+            if self.windup>self.windup_duration*.35 and self.memory<.5:
+                self.attack_heading = turn_towards(self.attack_heading,math.atan2(camera.x-self.x,camera.z-self.z),
+                                                   PERCEPTION['windup_tracking'],dt)
+            self.yaw = self.attack_heading
+            self._nav_timer = 0
+            self._move(dt,(self.x+math.sin(self.yaw)*2,self.z+math.cos(self.yaw)*2),world,camera,self.speed*.9,0)
             self.windup -= dt
             if self.windup<=1e-6:
                 self.transition('recover')
                 self.cooldown = max(self.recovery,self.attack_cooldown-self.windup_duration)
-                facing = ((camera.x-self.x)*math.sin(self.yaw)+(camera.z-self.z)*math.cos(self.yaw))/max(.01,distance)
-                if distance<=self.reach and facing>.5 and world.line_clear(self.x,self.z,camera.x,camera.z,.1):
+                if attack_hits(self,camera,world,self.reach):
                     return self.damage
             return 0
         if self.state == 'recover':
+            if self.last_known:
+                self._move(dt,self.last_known,world,camera,self.speed*PERCEPTION['recovery_speed'])
             if self.cooldown<=1e-6:
                 self.transition('pursue' if self.memory<world.ai_persistence else 'search')
             return 0
@@ -158,10 +175,11 @@ class Senses:
                 attacking = sum(e is not self and e.state=='attack' and e.distance_to(self.x,self.z)<8 for e in world.actors)
                 if attacking<getattr(world,'max_attackers',2) and world.clock>=world.next_attack and world.line_clear(self.x,self.z,camera.x,camera.z,.1):
                     self.yaw = math.atan2(camera.x-self.x,camera.z-self.z)
+                    self.attack_heading = self.yaw
                     self.transition('attack')
                     self.windup = self.windup_duration
                     self.attack_elapsed = 0
-                    world.next_attack = world.clock+.24
+                    world.next_attack = world.clock+PERCEPTION['coordination_gap']
                 return 0
             target = self.last_known or self.home
             if self.kind=='spider' and self.memory<.4 and distance>2.5:
@@ -186,8 +204,11 @@ class Senses:
             if self.distance_to(*self.last_known)<1 or self.state_time>6:
                 self.transition('search')
         elif self.state == 'search':
-            self.yaw += dt*1.5
-            if self.state_time>3:
+            anchor = self.last_known or self.home
+            radius = min(5,1+self.state_time*.5)
+            self._move(dt,(anchor[0]+math.sin(self.state_time*1.4)*radius,
+                           anchor[1]+math.cos(self.state_time*1.4)*radius),world,camera,self.speed*.5)
+            if self.state_time>PERCEPTION['search_seconds']:
                 self.last_known = None
                 self.transition('patrol')
         elif self.state in ('patrol','idle'):
@@ -200,17 +221,23 @@ class Senses:
 
     def snapshot(self):
         names = ('kind','x','y','z','yaw','health','state','cooldown','windup','attack_elapsed','home','last_known',
-                 'memory','state_time','patrol_side','ambush_used','ambush_height','sees_player','last_sound')
+                 'memory','state_time','patrol_side','ambush_used','ambush_height','sees_player','last_sound','attack_heading')
         return {name:getattr(self,name) for name in names}
 
 
 class WildDog(Senses,Dog):
+    detection = PERCEPTION['dog_detection']
+    default_speed = PERCEPTION['dog_speed']
+    reach = PERCEPTION['dog_reach']
     def __init__(self,position):
         super().__init__(position)
         self.setup_senses()
 
 
 class AmbushSpider(Senses,Spider):
+    max_health = SURVIVAL_SPIDER['health']
+    damage = SURVIVAL_SPIDER['damage']
+    reach = SURVIVAL_SPIDER['range']
     default_speed = SURVIVAL_SPIDER['speed']
     detection = SURVIVAL_SPIDER['detection']
     windup_duration = SURVIVAL_SPIDER['windup']
@@ -225,3 +252,21 @@ class AmbushSpider(Senses,Spider):
     def render_meshes(self):
         from engine import models
         return models.pose_spider(self.meshes,self.walk_phase,self.walk_blend,self.attack_elapsed)
+
+
+class Viper(Senses,Dog):
+    max_health,default_speed,detection = VENOM['health'],VENOM['speed'],VENOM['detection']
+    damage,reach = VENOM['damage'],VENOM['range']
+    windup_duration,attack_cooldown,recovery = VENOM['windup'],VENOM['cooldown'],VENOM['recovery']
+
+    def __init__(self,position):
+        from engine import models
+        super().__init__(position)
+        self.kind,self.radius,self.meshes = 'viper',.24,models.viper()
+        self.setup_senses()
+        self.state = 'patrol'
+
+    @property
+    def render_meshes(self):
+        from engine import models
+        return models.pose_viper(self.meshes,self.walk_phase,self.attack_elapsed)
