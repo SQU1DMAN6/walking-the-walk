@@ -2,8 +2,8 @@ from engine.run_recipes import EXTRA_RECIPES
 
 
 ITEMS = {
-    "food": ("Canned food", "Consumable", 1),
-    "water": ("Bottled water", "Consumable", 1),
+    "food": ("Canned food", "Consumable", 5),
+    "water": ("Bottled water", "Consumable", 3),
     "metal_scrap": ("Metal scrap", "Material", 20),
     "plastic_scrap": ("Plastic scrap", "Material", 20),
     "stick": ("Stick", "Material", 20),
@@ -12,7 +12,7 @@ ITEMS = {
     "spear": ("Stone spear", "Weapon", 1),
     "axe": ("Stone axe", "Weapon", 1),
     "leaves": ("Leaves", "Material", 20),
-    "bandage": ("Bandage", "Consumable", 10),
+    "bandage": ("Bandage", "Consumable", 15),
 }
 RECIPES = {
     "compass": {"name": "Compass", "materials": {"metal_scrap": 1, "plastic_scrap": 1},
