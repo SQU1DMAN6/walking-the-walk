@@ -81,10 +81,14 @@ class Inventory:
     def consume_selected(self):
         item = self.selected_item
         scrap = CONSUMED_CONTAINER.get(item)
-        if scrap is None or self.slots[self.selected_slot][1] != 1:
+        if scrap is None:
             return None
-        # Empty the container; its slot keeps the leftovers.
-        self.slots[self.selected_slot] = (scrap, 1)
+        candidate = self.slots.copy()
+        qty = candidate[self.selected_slot][1]
+        candidate[self.selected_slot] = (item, qty-1) if qty > 1 else None
+        if not self._insert(candidate, scrap, 1):
+            return None
+        self.slots = candidate
         return scrap
 
     def _crafted_slots(self, recipe_id):

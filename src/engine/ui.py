@@ -82,6 +82,7 @@ class TutorialHUD:
         if level.health_flash_timer:
             colour=(104,240,147) if level.health_feedback=='heal' else (255,116,101)
             pygame.draw.rect(surface,colour,rect,3,border_radius=9)
+        self.vitals_rect = rect
         return rect
 
     def press_button(self, rect):
@@ -324,10 +325,10 @@ class TutorialHUD:
                 author_y=title_y+self.logo_font.size('A')[1]+12
                 self.panel(surface,pygame.Rect(8,author_y-4,width-16,self.font.size('A')[1]+4))
                 self.text(surface,'Written by Quan Thai',16,author_y,font=self.font)
-                self.text(surface,'Version 1.6',width-16-self.font.size('Version 1.6')[0],author_y,font=self.font)
+                self.text(surface,'Version 1.7',width-16-self.font.size('Version 1.7')[0],author_y,font=self.font)
             else:
                 self.text(surface,'Written by Quan Thai',width//2,title_y+self.logo_font.size('A')[1]+12,font=self.font,center=True)
-                self.text(surface,'Version 1.6',width//2,title_y+self.logo_font.size('A')[1]+56,font=self.font,center=True)
+                self.text(surface,'Version 1.7',width//2,title_y+self.logo_font.size('A')[1]+56,font=self.font,center=True)
             for index, (label, button) in enumerate(zip(TITLE_BUTTONS, buttons)):
                 self.button(surface, button, label, index == menu.selected)
             hint = 'First time playing? Start with Tutorial so you don\'t regret life'
@@ -607,6 +608,7 @@ class TutorialHUD:
         compact=cells[0].y!=cells[5].y
         instruction=self.lesson_body(level,compact,progress)
         heading = 'BEACON REACHED' if level.in_beacon_ring else f'{min(int(level.state)+1, 10)}/10  {title}'
+        heading = getattr(level, 'lesson_heading', heading)
         self.text(surface, heading, rect.centerx, rect.y+8, (255, 218, 169), title_font, center=True)
         self.wrapped(surface, instruction, rect.centerx, rect.y+16+title_font.size('A')[1], rect.width-32,
                      (247, 241, 229), font, center=True)
@@ -632,7 +634,8 @@ class TutorialHUD:
             pygame.draw.rect(overlay, (224, 119, 85), (rect.x+10, rect.y+43, int(168*level.dog.health/DOG_HEALTH), 8))
 
         names = {'food': 'Food', 'water': 'Water', 'metal_scrap': 'Metal', 'plastic_scrap': 'Plastic',
-                 'stick': 'Stick', 'rock': 'Rock', 'compass': 'Compass', 'spear': 'Spear'}
+                 'stick': 'Stick', 'rock': 'Rock', 'compass': 'Compass', 'spear': 'Spear',
+                 'axe': 'Axe', 'leaves': 'Leaves', 'bandage': 'Bandage'}
         cells = self.hotbar_layout(width, height)
         compact=cells[0].y!=cells[5].y
         for i,rect in enumerate(cells):
@@ -710,11 +713,37 @@ class TutorialHUD:
             self.damage_indicator(overlay,level,width,height)
         if level.crafting_open:
             self.crafting_menu(overlay, level, width, height)
-        if paused or not level.active:
+        self.effect_feedback(overlay, level, width, height)
+        if paused or (not level.active and not level.transition_pending):
             self.overlay_menu(overlay, level, width, height, paused)
         if level.help_open:
             self.controls_overlay(overlay, width, height)
         self.present(overlay)
+
+    def effect_feedback(self, surface, level, width, height):
+        effect = level.effects.latest('consumed')
+        if effect and level.state != Stage.DEAD:
+            from engine.effects import COLOURS
+            colour = (*COLOURS[effect.detail], round(180*effect.opacity))
+            pygame.draw.rect(surface, colour, (4, 4, width-8, height-8), 4, border_radius=12)
+            pygame.draw.rect(surface, colour, self.vitals_rect.inflate(4, 4), 3, border_radius=8)
+        effect = level.effects.latest('crafted')
+        if effect:
+            if level.crafting_open and getattr(level, 'recipes', RECIPE_ORDER)[level.selected_recipe] == effect.detail:
+                _, _, button = self.crafting_layout(width, height)
+                pygame.draw.rect(surface, (143, 239, 176, round(240*effect.opacity)), button, 3, border_radius=8)
+            number = level.inventory.number_for(effect.detail)
+            if number and not level.crafting_open:
+                rect = self.hotbar_layout(width, height)[number-1]
+                pygame.draw.rect(surface, (143, 239, 176, round(240*effect.opacity)), rect, 3, border_radius=8)
+        death = level.effects.latest('player_died')
+        if death:
+            tint = pygame.Surface((width, height), pygame.SRCALPHA)
+            tint.fill((45, 5, 8, round(155*death.progress)))
+            surface.blit(tint, (0, 0))
+            self.text(surface, 'YOU FELL', width//2, height//2, (255, 199, 183), self.title_font, True)
+        elif level.effects.latest('beacon_activated'):
+            self.text(surface, 'BEACON LINKED', width//2, height//2-50, (119, 255, 226), self.title_font, True)
 
     def present(self, surface):
         from OpenGL import GL as gl

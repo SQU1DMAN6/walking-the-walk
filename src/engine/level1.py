@@ -1,4 +1,6 @@
 from engine.feedback import DamageFeedback
+from engine.effects import Effects
+from engine.felling import TreeFalls
 from engine.run_config import HEAVY_ATTACK
 from enum import IntEnum
 import math
@@ -88,6 +90,9 @@ class Level1:
         self.objective_flash_timer = self.health_flash_timer = 0.0
         self.health_feedback = None
         self.damage_feedback = DamageFeedback()
+        self.effects = Effects()
+        self.tree_falls = TreeFalls()
+        self._death_confirmed = False
         self._prompt_id = None
         self._sprint_blocked = False
         self.interaction_prompt = None
@@ -212,6 +217,7 @@ class Level1:
                                   len(targets), self.world.position(*point), target.kind == 'dog')
 
     def select_slot(self, number):
+        if not self.active:return False
         changed = self.inventory.select_slot(number)
         if changed:
             self.cancel_use()
@@ -234,9 +240,22 @@ class Level1:
         self.damage_feedback.record(self.camera,position,source)
         # Getting bitten shouldn't confiscate your water break.
         if self.camera.health<=0:
-            self.state = Stage.DEAD
-            self.cancel_use()
+            self.confirm_death()
         return True
+
+    def confirm_death(self):
+        if self._death_confirmed or self.state == Stage.COMPLETE:
+            return
+        self._death_confirmed = True
+        self.state = Stage.DEAD
+        self.crafting_open = self.help_open = False
+        self.cancel_use()
+        self.effects.emit('player_died', (self.camera.x, self.camera.y, self.camera.z))
+
+    @property
+    def transition_pending(self):
+        kind = 'player_died' if self.state == Stage.DEAD else 'beacon_activated'
+        return not self.active and self.effects.latest(kind) is not None
 
     def update_use(self, dt, held):
         item = self.inventory.selected_item
@@ -531,6 +550,7 @@ class Level1:
         if self.crafting_open or self.help_open:
             return
         dt = max(0, min(dt, .1))
+        self.effects.update(dt, self.entities)
         self.elapsed += dt
         self.notification_timer = max(0, self.notification_timer-dt)
         self.objective_flash_timer = max(0, self.objective_flash_timer-dt)

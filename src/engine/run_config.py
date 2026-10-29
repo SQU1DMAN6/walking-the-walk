@@ -35,7 +35,7 @@ VENOM = {'health':30,'speed':5.1,'detection':24.,'range':1.55,'damage':2,'windup
          'cooldown':.7,'recovery':.46,'tick_seconds':2.,'tick_damage':2,
          'threshold':{'Short':100.,'Normal':500.,'Long':500.},'spacing':36.,
          'spawn_interval':{'Easy':22.,'Medium':17.,'Hard':13.},
-         'population':{'Easy':2,'Medium':3,'Hard':4},'water_stamina':60.}
+         'population':{'Easy':2,'Medium':3,'Hard':4},'water_stamina':75.}
 BOSS = {'health':240,'detection':50.,'speed':3.2,'phase_speed':3.8,'radius':.85,'trigger':38.,'emerge':1.4,
         'leash':23.,'armor':.25,'phase_at':.5,
         'cleave':{'windup':.8,'active':.16,'recovery':1.25,'range':3.6,'damage':20,'arc':75.},

@@ -96,7 +96,10 @@ class TutorialChunk:
 
             for mesh in tree:
                 self.meshes.append(self._jungle(mesh, mesh.colour[1] > mesh.colour[0]))
-            self.obstacles.append(Obstacle(x, z, radius, 'tree'))
+            obstacle = Obstacle(x, z, radius, 'tree')
+            self.obstacles.append(obstacle)
+            if hasattr(self, 'tree_geometry'):
+                self.tree_geometry.append((self.position(x, z), obstacle, tree))
             self.details.append(('tree', x, z, False))
         for i in range(1100):
             x, z = rng.uniform(-38, 38), rng.uniform(-38, 38)

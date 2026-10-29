@@ -64,6 +64,9 @@ class PathNetwork:
     def nearest_route_index(self, x, z):
         return min(range(len(self.route)), key=lambda i: math.hypot(x-self.route[i][0], z-self.route[i][1]))
 
+    def nearby_segments(self,x,z):
+        return sorted(self.segments,key=lambda edge:segment_distance(x,z,*edge))[:12]
+
     def samples(self, spacing=.25):
         count = math.ceil(self.lengths[-1] / spacing)
         return [self.at(i * self.lengths[-1] / count) for i in range(count + 1)]

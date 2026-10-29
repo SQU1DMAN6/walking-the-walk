@@ -181,7 +181,7 @@ class SurvivalRun(Level1):
         if cache_key not in self._resource_meshes:
             factory = {'can':models.food_can,'food':models.food_can,'bottle':models.plastic_bottle,'water':models.plastic_bottle,
                        'rock':models.rock,'stick':models.stick,'sign':models.skull_sign,'leaves':models.leaves,
-                       'bandage':models.bandage,'axe':models.axe,'spear':models.spear,
+                       'bandage':models.bandage,'axe':models.world_axe,'spear':models.spear,
                        'compass':lambda:models.compass()[0],
                        'metal_scrap':lambda:[models.lathe([(0,.2),(.03,.2)],(170,179,180),6)],
                        'plastic_scrap':lambda:[models.lathe([(0,.15),(.08,.18)],(123,188,206),5)]}[kind]
@@ -224,7 +224,7 @@ class SurvivalRun(Level1):
 
     @property
     def hostiles(self):
-        return self.entities.of_kind(*HOSTILE_TYPES,'boss')
+        return tuple(e for e in self.entities.of_kind(*HOSTILE_TYPES,'boss') if e.health>0)
 
     @property
     def remaining_distance(self):
@@ -297,6 +297,7 @@ class SurvivalRun(Level1):
             self.notify(reason)
             return False
         self.stats['crafted'] += 1
+        self.effects.emit('crafted', (self.camera.x, self.camera.y, self.camera.z), detail=recipe)
         self.notify(ITEMS[recipe][0]+' crafted')
         return True
 
@@ -321,7 +322,7 @@ class SurvivalRun(Level1):
         x, z = self.camera.x+.7*math.sin(self.camera.yaw), self.camera.z+.7*math.cos(self.camera.yaw)
         if not self.world.is_walkable(x,z):
             x,z = self.camera.x,self.camera.z
-        if len(self.drops)>=512:
+        if len(self.drops)+len(self.tree_falls.live)>=512:
             self.notify('Too much loose loot. Pick some up first.')
             return False
         position = self.world.position(x,z)
@@ -357,20 +358,21 @@ class SurvivalRun(Level1):
             self.camera.stamina = min(self.camera.max_stamina,self.camera.stamina+VENOM['water_stamina'])
             cured = self.poison.cure()
             extra = f' | +{int(self.camera.stamina-stamina_before)} stamina'+(' | Poison cured' if cured else '')
+        self.effects.emit('consumed', (self.camera.x, self.camera.y, self.camera.z), detail=item)
         self.health_feedback, self.health_flash_timer = 'heal', .65
         self.notify(f'+{int(self.camera.health-before)} health'+extra+(f' | +1 {ITEMS[scrap][0]}' if scrap else ''))
         return True
 
-    def interaction_target(self):
+    def interaction_target(self,allowed=None):
         if not self.active or self.crafting_open or self.help_open:
             return None
         beacon = self.entities.get(self.beacon_id)
-        if (beacon and beacon.distance_to(self.camera.x,self.camera.z)<=INTERACTION_RANGE
+        if (beacon and (allowed is None or allowed(beacon)) and beacon.distance_to(self.camera.x,self.camera.z)<=INTERACTION_RANGE
                 and self.world.line_clear(self.camera.x,self.camera.z,beacon.x,beacon.z,.1)):
             return beacon
         choices = []
         for target in self.entities.all():
-            if not target.interactable or not target.visible:
+            if not target.interactable or not target.visible or (allowed is not None and not allowed(target)):
                 continue
             distance = target.distance_to(self.camera.x, self.camera.z)
             if target.kind == 'tree':
@@ -448,6 +450,7 @@ class SurvivalRun(Level1):
             if not self.inventory.add_many(self.loot(target)):
                 self.notify("Pack full | Select a slot; [G] drops its stack")
                 return False
+            self.effects.emit('pickup', target.position)
             self.mark_removed(target)
             self.stats['collected'] += 1
             self.notify(' + '.join(f'+{qty} {ITEMS[item][0]}' for item, qty in self.loot(target).items()))
@@ -503,18 +506,45 @@ class SurvivalRun(Level1):
             self.notify(f'Hit: {actual} | {target.kind}: {target.health} health'+
                         (' | Guarded; wait for recovery' if actual<damage and target.health>0 else ''))
             if target.health <= 0:
-                self.mark_removed(target)
-                self.stats['defeated'] += 1
-                self.notify(target.kind.title()+' defeated')
-                if target.kind=='boss':self.notify('The Demon thing has been defeated. The beacon is yours.',6)
+                self.defeat_enemy(target)
+        return True
+
+    def defeat_enemy(self, target):
+        if target.health>0 or getattr(target, '_defeat_confirmed', False):return False
+        target._defeat_confirmed = True
+        target.state = 'defeated'
+        if target.kind == 'boss':
+            target.encounter = BossStage.DEFEATED
+            target.telegraph = None
+            target.visible = False
+        self.mark_removed(target)
+        self.stats['defeated'] += 1
+        self.effects.emit('boss_defeated' if target.kind=='boss' else 'enemy_defeated',
+                          target.position, yaw=target.yaw, meshes=target.meshes, detail=target.kind)
+        self.notify('The Demon thing has been defeated. The beacon is yours.' if target.kind=='boss'
+                    else target.kind.title()+' defeated', 4)
+        return True
+
+    def hit_by_tree(self,target,damage):
+        if target.health<=0:return False
+        if target.kind=='boss':
+            if target.encounter!=BossStage.ACTIVE:return False
+            target.receive_hit(damage)
+        else:target.health=max(0,target.health-damage)
+        if target.health<=0:self.defeat_enemy(target)
         return True
 
     def chop(self, target):
+        if not self.active or self.crafting_open or self.help_open or target.site.removed or self.entities.get(target.id) is not target:
+            return False
+        if len(self.tree_falls.live)>=self.tree_falls.capacity:
+            self.notify('Let the falling trees settle first.')
+            return False
         key = getattr(target,'world_key',None)
         if len(self.world.removed_trees)>=4096 or (key not in self.tree_chops and len(self.tree_chops)>=4096):
             self.notify('Forest edit budget reached. Time to find that beacon.')
             return False
-        if target.chops+1>=TREE_CHOPS and len(self.drops)>=512:
+        if target.chops+1>=TREE_CHOPS and len(self.drops)+len(self.tree_falls.live)>=512:
             self.notify('Loose loot budget reached. Pick some up before felling more trees.')
             return False
         if self.inventory.selected_item != 'axe' or self.interaction_target() != target or not self._swing():
@@ -524,22 +554,27 @@ class SurvivalRun(Level1):
         self.sound('chop',PERCEPTION['chop_noise'])
         self.notify(f'Chop {target.chops}/{TREE_CHOPS}')
         if target.chops >= TREE_CHOPS:
-            self.tree_chops.pop(getattr(target,'world_key',None),None)
-            self.world.remove_tree(target.site)
-            self.mark_removed(target)
-            self.camera.obstacles = [(o.x, o.z, o.radius, 2) for o in self.world.obstacles]
             distance = max(.01, target.distance_to(self.camera.x, self.camera.z))
             x = self.camera.x+(target.x-self.camera.x)/distance*.5
             z = self.camera.z+(target.z-self.camera.z)/distance*.5
             if not self.world.is_walkable(x, z):
                 x, z = self.camera.x, self.camera.z
-            self._drop_serial += 1
-            key = ('drop',self._drop_serial)
-            self.drops[key] = self.world.position(x,z),'leaves',TREE_LEAVES
-            self._sync_entities()
+            self.tree_falls.start(target.site, self.camera, self.world.position(x, z), self.world)
+            self.tree_chops.pop(getattr(target,'world_key',None),None)
+            self.world.remove_tree(target.site)
+            self.mark_removed(target)
+            self.camera.obstacles = [(o.x, o.z, o.radius, 2) for o in self.world.obstacles]
             self.stats['trees'] += 1
-            self.notify('Tree cleared | Leaves dropped')
+            self.effects.emit('tree_felled', target.position)
+            self.notify('Timber! Watch the trunk. Leaves drop when it lands.')
         return True
+
+    def finish_tree_fall(self, tree):
+        self._drop_serial += 1
+        key = ('drop', self._drop_serial)
+        self.drops[key] = tree.reward_position, 'leaves', TREE_LEAVES
+        self._sync_entities()
+        self.notify('Tree landed | Pick up leaves [F]')
 
     @property
     def north_progress(self):
@@ -574,9 +609,11 @@ class SurvivalRun(Level1):
 
     def update(self,dt):
         if self.camera.health<=0 and self.state!=Stage.COMPLETE:
-            self.state = Stage.DEAD
-            self.cancel_use()
-        if not self.active or self.crafting_open or self.help_open:return
+            self.confirm_death()
+        if self.crafting_open or self.help_open:return
+        if not self.active:
+            self.effects.update(max(0, min(.25, dt)), self.entities)
+            return
         self._simulation_accumulator += max(0,min(.25,dt))
         while self._simulation_accumulator+1e-9>=1/60:
             self._simulation_accumulator -= 1/60
@@ -592,6 +629,7 @@ class SurvivalRun(Level1):
     def _boss_feedback(self):
         while self.boss.events:
             event = self.boss.events.pop(0)
+            if event == 'defeated':self.defeat_enemy(self.boss)
             text = {'emerging':'The clearing went quiet. The Demon is rising.',
                     'cleave':'Demon: claw sweep! Break its reach.',
                     'slam':'Demon: red ground! Change direction and get out.',
@@ -611,15 +649,13 @@ class SurvivalRun(Level1):
 
     def _step(self, dt):
         if self.camera.health<=0 and self.state!=Stage.COMPLETE:
-            self.state = Stage.DEAD
-            self.cancel_use()
+            self.confirm_death()
             return
         if not self.active or self.crafting_open or self.help_open:
             return
         dt = max(0, min(.1, dt))
         if self.camera.health<=0:
-            self.state = Stage.DEAD
-            self.cancel_use()
+            self.confirm_death()
             return
         self.world.pinned_chunks = {chunk_key(e.x,e.z) for e in self.hostiles
                                     if e.state in ('pursue','flank','attack','recover','investigate','search','cleave','slam')
@@ -633,8 +669,13 @@ class SurvivalRun(Level1):
             self.notify('Forest loading hit a snag. Pause and start a new run.',8)
         if self._stream_revision != self.world.render_revision:
             self._sync_entities()
+        self.effects.update(dt, self.entities)
+        self.tree_falls.update(dt, self)
+        if not self.active:return
         self.damage_feedback.update(dt)
         self.world.clock += dt
+        for enemy in self.entities.of_kind(*HOSTILE_TYPES, 'boss'):
+            if enemy.health<=0:self.defeat_enemy(enemy)
         self.world.actors = self.hostiles
         current = self.camera.x,self.camera.z
         travelled = math.dist(current,self._previous_position)
@@ -680,6 +721,7 @@ class SurvivalRun(Level1):
                 self.beacon_commit -= dt
                 if self.beacon_commit<=1e-6:
                     self.state,self.completion_time = Stage.COMPLETE,self.elapsed
+                    self.effects.emit('beacon_activated', beacon.position)
                     self.cancel_use()
                     self.notify('Northern end reached. W.',6)
         if self.camera.sprint_blocked and not self._sprint_blocked:

@@ -1,4 +1,5 @@
 import argparse
+import copy
 import json
 import math
 import time
@@ -7,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 import pygame
 from OpenGL import GL as gl
 from engine.camera import Camera
-from engine.level1 import Level1, Stage
+from engine.level1 import Stage
+from engine.tutorial import TutorialRun as Level1
 from engine.opengl_renderer import OpenGLRenderer, build_batches, upload_batches
 from engine.ui import TutorialHUD
 from engine.screenshot import save_png
@@ -17,6 +19,7 @@ from engine import models
 from engine.menu import MenuFlow, Screen
 from engine.survival import SurvivalRun
 from engine.survival_ui import SurvivalHUD
+from engine.workshop_ui import ExpandedTutorialHUD
 from engine.run_config import RunSeeds
 
 
@@ -37,13 +40,20 @@ def create_display(args):
 
 def render_scene(renderer, level, batches):
     camera = level.camera
+    death = level.effects.latest('player_died')
+    if death or level.state == Stage.DEAD:
+        camera = copy.copy(camera)
+        from engine.animation import ease
+        collapse = ease(death.progress) if death else 1.
+        camera.y -= .85*collapse
+        camera.pitch += .35*collapse
     gl.glClearColor(*SKY_COLOUR, 1.0)
     gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
     renderer.render_frame(camera, batches)
     instances = []
     for entity in level.entities.all():
         distance = entity.distance_to(camera.x,camera.z)
-        if entity.visible and (not getattr(level,'is_survival',False) or
+        if entity.visible and (not hasattr(level.world,'chunks') or
                                (distance < 58 and renderer.visible(camera,entity.x,entity.y,entity.z,2))):
             for mesh in entity.render_meshes:
 
@@ -51,6 +61,8 @@ def render_scene(renderer, level, batches):
                 cy, sy = math.cos(entity.yaw), math.sin(entity.yaw)
                 instances.append((mesh,entity.x+mx*cy+mz*sy,entity.y+my,entity.z-mx*sy+mz*cy,entity.yaw))
     renderer.render_models(camera,instances)
+    renderer.render_models(camera, level.tree_falls.instances())
+    level.effects.draw(renderer, camera)
     prompt = level.world_prompt()
     for marker in level.objective_markers():
         if prompt and marker.target_id == prompt.target_id and marker.style == 'arrow':
@@ -68,7 +80,7 @@ def render_scene(renderer, level, batches):
                 renderer.render_mesh_dynamic(camera, mesh, *pos)
             gl.glEnable(gl.GL_DEPTH_TEST)
 
-    if level.state != Stage.BEACON:
+    if level.state != Stage.BEACON and not getattr(level, 'is_workshop', False):
         renderer.render_mesh_dynamic(camera, level.ring_mesh, *level.world.beacon)
     held = level.inventory.selected_item
     if held and level.active:
@@ -194,6 +206,8 @@ class Application:
                 self.loading_future = None
         elif event.type == pygame.KEYDOWN:
             level = self.level
+            if not level.active and event.key == pygame.K_h:
+                return
             if event.key == pygame.K_h:
                 if getattr(level, 'is_survival', False):
                     if level.help_open:
@@ -305,16 +319,16 @@ class Application:
                         self.renderer = OpenGLRenderer(self.width, self.height)
                         self.renderer.focal_length = self.width*.7
                         is_run = getattr(level,'is_survival',False)
-                        self.renderer.fog_color = SKY_COLOUR if is_run else (.18,.28,.22)
-                        self.renderer.fog_near,self.renderer.fog_far = (28,60) if is_run else (24,68)
-                        if getattr(level,'is_survival',False):
+                        self.renderer.fog_color = SKY_COLOUR if hasattr(level.world,'chunks') else (.18,.28,.22)
+                        self.renderer.fog_near,self.renderer.fog_far = (28,60) if hasattr(level.world,'chunks') else (24,68)
+                        if hasattr(level.world,'chunks'):
                             self.sync_chunks(level,initial=True)
                         else:
                             self.batches = build_batches(level.world.meshes)
                         self.level = level
                         is_run = getattr(level, 'is_survival', False)
                         self.hud.close()
-                        self.hud = SurvivalHUD() if is_run else TutorialHUD()
+                        self.hud = SurvivalHUD() if is_run else ExpandedTutorialHUD()
                         self.hud._intro_finished = True
                         self.menu.screen = Screen.RUN if is_run else Screen.TUTORIAL
                         self.render_revision = getattr(level.world, 'render_revision', 0)
@@ -354,7 +368,7 @@ class Application:
     def render(self, fps=0):
         if self.menu.screen in (Screen.TUTORIAL, Screen.RUN):
             revision = getattr(self.level.world, 'render_revision', 0)
-            if getattr(self.level,'is_survival',False):
+            if hasattr(self.level.world,'chunks'):
                 self.sync_chunks(self.level)
                 visible = []
                 for key,(_,batches) in self.chunk_batches.items():
@@ -369,7 +383,7 @@ class Application:
                 if old:
                     gl.glDeleteBuffers(len(old), [batch.vbo for batch in old])
                 self.render_revision = revision
-            if not getattr(self.level,'is_survival',False):
+            if not hasattr(self.level.world,'chunks'):
                 render_scene(self.renderer, self.level, self.batches)
             self.hud.draw(self.level, self.width, self.height, fps, paused=self.paused)
         else:

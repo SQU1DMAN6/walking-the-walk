@@ -8,6 +8,7 @@ import time
 from engine.chunk import Obstacle, TutorialChunk
 from engine.mesh import Mesh
 from engine.models import lathe, rock
+from engine.trees import forest_tree
 from engine.run_config import RIDGE_RADIUS, ARENA_RADIUS
 from engine.paths import segment_distance
 from engine.worldgen import create_branch, create_spinifex
@@ -129,15 +130,10 @@ class ForestStreaming:
                 continue
             ground, radius = self.height(x,z), rng.uniform(.27,.43)
             height = rng.uniform(5,8)
-            trunk = lathe([(0,radius),(height*.8,radius*.55),(height,.08)],(105,74,43),6)
-            trunk.position = (x,ground,z)
-            canopy = lathe([(height*.58,.3),(height*.65,2.2),(height*.85,2.9),(height,2.0),(height+.5,0)],
-                           (34,92+int(density*35),49),7)
-            canopy.position = trunk.position
-            upper = lathe([(height*.75,0),(height*.85,1.9),(height+.1,1.8),(height+.8,0)],(48,117,61),6)
-            upper.position = x+1.3,ground,z-.7
+            tree_seed=(self.seed*73856093 ^ cx*19349663 ^ cz*83492791 ^ index*2654435761) & 0xffffffffffffffff
+            meshes=forest_tree((x,ground,z),tree_seed,height,radius,density)
             obstacle = Obstacle(x,z,radius,'tree')
-            site = TreeSite(trunk.position,obstacle,[trunk,canopy,upper],(*key,index))
+            site = TreeSite((x,ground,z),obstacle,meshes,(*key,index))
             chunk.meshes.extend(site.meshes)
             chunk.trees.append(site)
             chunk.obstacles.append(obstacle)

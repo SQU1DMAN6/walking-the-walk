@@ -57,8 +57,12 @@ class SurvivalHUD(TutorialHUD):
             y += 10
         if self.small_font.size(reason)[0]>button.width:
             reason='Need materials' if reason.startswith('Need ') else 'Already owned' if reason.startswith('Already ') else reason
+        success = level.effects.latest('crafted')
+        success = success and success.detail == recipe
+        if success:reason = 'Crafted. Close [C]'
         self.wrapped(surface, reason, button.x, y+14, button.width, font=self.small_font)
-        self.button(surface, button, 'Craft [Enter]' if ready else 'Not ready', enabled=ready)
+        label = 'Crafted!' if success else 'Craft [Enter]' if ready else 'Not ready'
+        self.button(surface, button, label, enabled=ready)
         self.text(surface, '[Up/Down] choose | [C]/[Esc] back', panel.centerx, panel.bottom-30,
                   font=self.small_font, center=True)
 
@@ -193,7 +197,7 @@ class SurvivalHUD(TutorialHUD):
             pygame.draw.rect(overlay,(201,107,228),rect,2,border_radius=8)
             self.text(overlay,'POISONED | Drink water [E] to cure',22,rect.y+8,(231,176,247),self.small_font)
             info_bottom=rect.bottom
-        if level.notification_timer>0 and not (compact and (level.poison.active or (visible_threat and nearest.kind=='boss'))):
+        if level.active and level.notification_timer>0 and not (compact and (level.poison.active or (visible_threat and nearest.kind=='boss'))):
             toast_width=min(760,width-32)
             lines=self.lines(level.notification,toast_width-20,self.small_font)
             toast_height=12+len(lines)*(self.small_font.size('A')[1]+4)
@@ -215,7 +219,8 @@ class SurvivalHUD(TutorialHUD):
             self.damage_indicator(overlay,level,width,height)
         if level.crafting_open:
             self.crafting_menu(overlay, level, width, height)
-        if paused or not level.active:
+        self.effect_feedback(overlay, level, width, height)
+        if paused or (not level.active and not level.transition_pending):
             self.overlay_menu(overlay, level, width, height, paused)
         if level.help_open:
             self.controls_overlay(overlay, width, height)

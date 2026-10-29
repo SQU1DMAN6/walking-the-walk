@@ -179,14 +179,22 @@ RESOURCE_MODELS = {"can": food_can, "bottle": plastic_bottle, "stick": stick, "r
 def axe():
     handle = create_branch((.43,-.65,.72),(.43,.25,1.03),.065,(139,94,46))
     collar = create_prism(.14,.15,.17,(91,101,98),(.43,.23,1.03))
-    # Wedge edge faces forward. Hoe era is over.
-    outline = [(.43,.34,.98),(.43,.12,.98),(.43,.06,1.45),(.43,.40,1.45)]
-    vertices = [(x+side,y,z) for side in (-.075,.075) for x,y,z in outline]
-    faces = [(0,1,2),(0,2,3),(4,6,5),(4,7,6),(0,4,5),(0,5,1),
-             (1,5,6),(1,6,2),(3,2,6),(3,6,7),(0,3,7),(0,7,4)]
+    # Actual edge, zero fridge-door energy.
+    vertices = [(.355,.12,.98),(.505,.12,.98),(.43,.06,1.45),
+                (.355,.34,.98),(.505,.34,.98),(.43,.40,1.45)]
+    faces = [(0,1,2),(3,5,4),(0,4,1),(0,3,4),
+             (1,5,2),(1,4,5),(2,3,0),(2,5,3)]
     head = Mesh(vertices,faces,(153,166,168),(0,0,0))
-    edge = create_branch((.43,.06,1.45),(.43,.40,1.45),.035,(223,231,221))
+    edge = Mesh([(.413,.06,1.41),(.447,.06,1.41),(.43,.06,1.45),
+                 (.413,.40,1.41),(.447,.40,1.41),(.43,.40,1.45)],
+                faces,(223,231,221),(0,0,0))
     return [handle,collar,head,edge]
+
+
+def world_axe():
+    return [Mesh([(x+mesh.position[0]-.43, y+mesh.position[1]+.72, z+mesh.position[2]-.9)
+                  for x, y, z in mesh.vertices], mesh.faces, mesh.colour, (0, 0, 0))
+            for mesh in axe()]
 
 
 def pose_axe(meshes, remaining):
