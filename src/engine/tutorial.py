@@ -9,7 +9,7 @@ from engine.entity import Entity
 from engine.guidance import ActionCoach, ObjectiveDirection
 from engine.items import ITEMS, RECIPES, RUN_RECIPE_ORDER
 from engine.level1 import Level1, Stage
-from engine.markers import ObjectiveMarker
+from engine.markers import ObjectiveMarker,ground_arrow
 from engine.prompts import WorldPrompt
 from engine.survival import SurvivalRun, RunTree
 from engine.run_config import RunConfig,WEAPONS
@@ -44,7 +44,11 @@ class TutorialForest(ForestStreaming):
 
     def __init__(self,seed=42):
         self.seed=seed
-        self.paths=PathNetwork(seed)
+        self.axe_station_arc=70.+(sum(RECIPES['axe']['materials'].values())-1)*1.45
+        self.paths=PathNetwork(seed,finish_distance=self.axe_station_arc+80.)
+        points=[*self.paths.route,*(p for branch in self.paths.branches for p in branch)]
+        self.bounds=(min(x for x,z in points)-10,max(x for x,z in points)+10,
+                     min(z for x,z in points)-10,max(z for x,z in points)+10)
         self.spawn,self.beacon=self.position(*self.paths.route[0]),self.position(*self.paths.route[-1])
         self.encounter=self.position(*self.paths.at(64))
         self.resources=[(kind,self.position(*self.paths.at(distance))) for kind,distance in
@@ -64,6 +68,12 @@ class TutorialForest(ForestStreaming):
         for kind,position in self.resources:
             self.resource_index.setdefault(chunk_key(position[0],position[2]),[]).append((kind,position))
         self._init_streaming()
+        for x,z in self.paths.samples(8):
+            key=chunk_key(x,z)
+            for dz in (-1,0,1):
+                for dx in (-1,0,1):
+                    neighbour=(key[0]+dx,key[1]+dz)
+                    if neighbour not in self.chunks:self._activate(self.generate_chunk(neighbour))
         self._approaches={}
         self._sites=tuple(site for site in self.trees if self.in_bounds(*site.position[::2],margin=-3.))
         candidates=sorted(self._sites,key=lambda site:math.dist(site.position[::2],self.paths.at(85)))
@@ -79,6 +89,7 @@ class TutorialForest(ForestStreaming):
         self._initial_meshes=tuple(self.meshes)
         self._initial_obstacles=tuple(self.obstacles)
         self.validation={'connected':all(self.is_walkable(x,z) for x,z in self.paths.samples()),
+                         'compass_walk_metres':self.paths.lengths[-1]-self.axe_station_arc,
                          'shared_forest_generator':True,'trees':len(self._sites),'extension_pickups':9}
         if not self.validation['connected']:raise ValueError('Tutorial route blocked')
 
@@ -379,7 +390,7 @@ class TutorialRun(Level1):
         return [ObjectiveMarker(target.id,'ring' if target.kind=='beacon' else 'arrow')] if target else []
 
     def objective_direction(self):
-        if not self.active or self.crafting_open or self.help_open or self.in_beacon_ring:return None
+        if not self.active or self.crafting_open or self.help_open or self.lesson==Lesson.BEACON:return None
         target=self.objective_target()
         if target is None:return None
         goal=(target.x,target.z)
@@ -395,6 +406,11 @@ class TutorialRun(Level1):
         name=names[target.kind] if point==goal else 'Path to '+names[target.kind].lower()
         remaining=1 if target.kind=='tree' else len(self._targets())
         return ObjectiveDirection(target.id,name,relative,target.distance_to(*source),remaining,self.world.position(*point),target.kind=='dog')
+
+    def ground_guidance(self):
+        direction=self.objective_direction()
+        if direction is None:return None
+        return ground_arrow(self.world,(self.camera.x,self.camera.z),direction.waypoint[::2])
 
     def action_coach(self):
         if not self.active or self.help_open:return None

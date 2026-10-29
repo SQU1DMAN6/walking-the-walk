@@ -15,6 +15,22 @@ def create_arrow():
 BEACON_RING_RADIUS = 1.65
 
 
+def ground_arrow(world,source,goal):
+    dx,dz=goal[0]-source[0],goal[1]-source[1]
+    distance=math.hypot(dx,dz)
+    if distance<.8:return None
+    ux,uz=dx/distance,dz/distance
+    ahead=min(6.,distance*.55)
+    x,z=source[0]+ux*ahead,source[1]+uz*ahead
+    size=min(1.,distance/3)
+    outline=[(-.22,-.8),(.22,-.8),(.22,.1),(.65,.1),(0,1.),(-.65,.1),(-.22,.1)]
+    points=[]
+    for side,forward in outline:
+        px,pz=x+(uz*side+ux*forward)*size,z+(-ux*side+uz*forward)*size
+        points.append((px,world.height(px,pz)+.18,pz))
+    return Mesh(points,[(0,2,1),(0,6,2),(3,5,4)],(255,64,46),(0,0,0))
+
+
 def create_ring(position, height, radius=BEACON_RING_RADIUS, thickness=.18, sides=48):
     x, _, z = position
     verts, faces = [], []

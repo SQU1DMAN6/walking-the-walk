@@ -63,6 +63,9 @@ def render_scene(renderer, level, batches):
     renderer.render_models(camera,instances)
     renderer.render_models(camera, level.tree_falls.instances())
     level.effects.draw(renderer, camera)
+    if getattr(level,'is_expanded_tutorial',False):
+        arrow=level.ground_guidance()
+        if arrow:renderer.render_mesh_dynamic(camera,arrow,0,0,0)
     prompt = level.world_prompt()
     for marker in level.objective_markers():
         if prompt and marker.target_id == prompt.target_id and marker.style == 'arrow':

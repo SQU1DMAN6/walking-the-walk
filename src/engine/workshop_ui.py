@@ -1,3 +1,4 @@
+import math
 import pygame
 
 from engine.animation import ease
@@ -13,6 +14,49 @@ class ExpandedTutorialHUD(SurvivalHUD):
     handle_overlay_click = TutorialHUD.handle_overlay_click
     hotbar_layout = staticmethod(TutorialHUD.hotbar_layout)
 
+    @staticmethod
+    def pointer(surface,start,target,colour=(255,229,123)):
+        dx,dy=target[0]-start[0],target[1]-start[1]
+        length=max(1.,math.hypot(dx,dy));ux,uy=dx/length,dy/length
+        pygame.draw.line(surface,(15,24,19),start,target,7)
+        pygame.draw.line(surface,colour,start,target,3)
+        points=[target,(target[0]-ux*14-uy*7,target[1]-uy*14+ux*7),
+                       (target[0]-ux*14+uy*7,target[1]-uy*14-ux*7)]
+        pygame.draw.polygon(surface,colour,points)
+        pygame.draw.lines(surface,(15,24,19),True,points,2)
+
+    def consumption_rect(self,width,height):
+        return pygame.Rect(22,self.hotbar_layout(width,height)[0].top-20,width-44,10)
+
+    def consumption_bar(self,surface,level,width,height):
+        if not level.use_progress:return
+        rect=self.consumption_rect(width,height)
+        pygame.draw.rect(surface,(15,25,20),rect.inflate(4,4),border_radius=4)
+        pygame.draw.rect(surface,(57,76,62),rect,border_radius=3)
+        fill=rect.copy();fill.width=round(rect.width*min(1.,level.use_progress/USE_DURATION))
+        pygame.draw.rect(surface,(124,238,182),fill,border_radius=3)
+
+    def direction_panel(self,surface,guidance,lesson=None):
+        font=self.small_font
+        turn='Ahead' if abs(guidance.relative)<.35 else 'Turn back' if abs(guidance.relative)>2.6 else 'Turn right' if guidance.relative>0 else 'Turn left'
+        name=guidance.name.removeprefix('Path to ')
+        if name.lower()=='water bottle':name='Water'
+        lines=[*self.lines(name,184,font),turn]
+        rect=pygame.Rect(12,126,260,16+len(lines)*(font.size('A')[1]+4))
+        if lesson and rect.colliderect(lesson):
+            rect.bottom=lesson.top-8
+        if rect.top<116 or rect.bottom>self.hotbar_layout(*surface.get_size())[0].top-28:return None
+        self.panel(surface,rect)
+        cx,cy=rect.x+36,rect.y+28
+        c,s=math.cos(guidance.relative),math.sin(guidance.relative)
+        points=[(0,-24),(-14,0),(-5,0),(-5,20),(5,20),(5,0),(14,0)]
+        points=[(cx+x*c-y*s,cy+x*s+y*c) for x,y in points]
+        pygame.draw.polygon(surface,(255,76,57),points)
+        pygame.draw.lines(surface,(255,223,193),True,points,2)
+        self.text(surface,f'{guidance.distance:.0f}m',cx,rect.bottom-font.size('A')[1]-5,font=font,center=True)
+        for i,line in enumerate(lines):self.text(surface,line,rect.x+76,rect.y+9+i*(font.size('A')[1]+4),font=font)
+        return rect
+
     def draw(self, level, width, height, fps, paused=False):
         self._fonts(height, width)
         overlay = pygame.Surface((width, height), pygame.SRCALPHA)
@@ -27,13 +71,10 @@ class ExpandedTutorialHUD(SurvivalHUD):
         for i, rect in enumerate(cells):
             self.panel(overlay, rect, i == level.inventory.selected_slot)
             self.slot_contents(overlay, rect, i, level.inventory.slots[i] if i < 9 else None, names, True)
-        coach = level.action_coach()
+        coach = level.action_coach() if not (paused or level.crafting_open or level.help_open) else None
         if coach and coach.slot is not None:
             pygame.draw.rect(overlay, (255, 229, 123), cells[coach.slot], 3, border_radius=8)
-        if level.use_progress and level.inventory.selected_slot < 9:
-            rect = cells[level.inventory.selected_slot]
-            pygame.draw.rect(overlay, (124, 218, 182), (rect.x+4, rect.bottom-6,
-                             round((rect.width-8)*level.use_progress/USE_DURATION), 4))
+        if not (paused or level.crafting_open or level.help_open):self.consumption_bar(overlay,level,width,height)
         playing = level.active and not (paused or level.crafting_open or level.help_open)
         if playing:
             lesson = self.lesson_rect(level, width, height)
@@ -70,6 +111,9 @@ class ExpandedTutorialHUD(SurvivalHUD):
                 pygame.draw.line(overlay, (241, 236, 211), (width//2-5, height//2), (width//2+5, height//2))
                 pygame.draw.line(overlay, (241, 236, 211), (width//2, height//2-5), (width//2, height//2+5))
             self.damage_indicator(overlay, level, width, height)
+            if coach and coach.slot is not None:
+                cell=cells[coach.slot]
+                self.pointer(overlay,(cell.right-18,cell.top+4),(cell.right-18,cell.top+32))
         gap = controls.left-vitals.right-24
         if level.active and gap >= 320 and level.notification_timer > 0 and not level.crafting_open:
             lines = self.lines(level.notification, gap-20, self.small_font)
@@ -127,10 +171,10 @@ class ExpandedTutorialHUD(SurvivalHUD):
             final_height=len(self.lines(final_body,round(min(width-32,900)*.92)-24,final_font))*(final_font.size('A')[1]+4)+12
             h = round(initial_height+(final_height-initial_height)*progress)
             central = height//2-initial_height//2
-            settled = cells[0].top-final_height-12
+            settled = cells[0].top-final_height-32
         else:
             central = height//2-h//2
-            settled = cells[0].top-h-12
+            settled = cells[0].top-h-32
         return pygame.Rect((width-w)//2, round(central+(settled-central)*progress), w, h)
 
     def lesson_panel(self, surface, level, rect):
@@ -158,6 +202,12 @@ class ExpandedTutorialHUD(SurvivalHUD):
             target = rows[level.recipes.index(level.expected_recipe)]
         else:target = button
         pygame.draw.rect(surface, (255, 229, 123), target, 3, border_radius=8)
+        if coach.kind=='recipe':
+            self.pointer(surface,(target.right+20,target.centery),(target.right-4,target.centery))
+        elif coach.kind=='close':
+            self.pointer(surface,(target.right-18,target.bottom+25),(target.right-18,target.bottom-4))
+        else:
+            self.pointer(surface,(target.right-18,target.top-28),(target.right-18,target.top+5))
 
     def overlay_menu(self, surface, level, width, height, paused):
         shade = pygame.Surface((width, height), pygame.SRCALPHA)

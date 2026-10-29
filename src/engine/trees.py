@@ -2,72 +2,96 @@ import math
 import random
 
 from engine.mesh import Mesh
-from engine.models import lathe
 
+RINGS={sides:tuple((math.cos(i*math.tau/sides),math.sin(i*math.tau/sides)) for i in range(sides)) for sides in (3,5,7)}
 
 def _merge(parts,colour):
     vertices,faces,colours=[],[],[]
     for points,triangles,tint in parts:
         offset=len(vertices)
         vertices.extend(points)
-        faces.extend(tuple(i+offset for i in face) for face in triangles)
+        faces.extend((a+offset,b+offset,c+offset) for a,b,c in triangles)
         colours.extend([tint]*len(points))
     return Mesh(vertices,faces,colour,(0,0,0),vertex_colours=colours)
 
 
-def _branch(start,end,radius,colour,sides=3):
-    dx,dy,dz=(b-a for a,b in zip(start,end));length=math.sqrt(dx*dx+dy*dy+dz*dz)
-    axis=(dx/length,dy/length,dz/length)
-    sideways=(axis[2],0,-axis[0]);norm=math.hypot(sideways[0],sideways[2])
-    sideways=(1,0,0) if norm<1e-8 else tuple(v/norm for v in sideways)
-    up=(axis[1]*sideways[2]-axis[2]*sideways[1],axis[2]*sideways[0]-axis[0]*sideways[2],axis[0]*sideways[1]-axis[1]*sideways[0])
+def _tube(centres,radii,colour,sides=5):
     points=[]
-    for centre,scale in ((start,1),(end,.28)):
-        for i in range(sides):
-            angle=i*math.tau/sides
-            points.append(tuple(centre[j]+radius*scale*(math.cos(angle)*sideways[j]+math.sin(angle)*up[j]) for j in range(3)))
+    for index,(centre,radius) in enumerate(zip(centres,radii)):
+        a,b=centres[max(0,index-1)],centres[min(len(centres)-1,index+1)]
+        dx,dy,dz=b[0]-a[0],b[1]-a[1],b[2]-a[2]
+        length=math.sqrt(dx*dx+dy*dy+dz*dz)
+        axis=(dx/length,dy/length,dz/length)
+        norm=math.hypot(dx,dz)
+        side=(dz/norm,0,-dx/norm) if norm>.00001 else (1,0,0)
+        up=(axis[1]*side[2],axis[2]*side[0]-axis[0]*side[2],-axis[1]*side[0])
+        for c,s in RINGS[sides]:
+            points.append((centre[0]+radius*(c*side[0]+s*up[0]),
+                           centre[1]+radius*s*up[1],centre[2]+radius*(c*side[2]+s*up[2])))
     faces=[]
-    for i in range(sides):
-        j=(i+1)%sides
-        faces.extend(((i,j,sides+i),(j,sides+j,sides+i)))
-    for i in range(1,sides-1):faces.extend(((0,i+1,i),(sides,sides+i,sides+i+1)))
+    for ring in range(len(centres)-1):
+        for i in range(sides):
+            a=ring*sides+i;b=ring*sides+(i+1)%sides
+            faces.extend(((a,b,a+sides),(b,b+sides,a+sides)))
+    for i in range(1,sides-1):
+        end=(len(centres)-1)*sides
+        faces.extend(((0,i+1,i),(end,end+i,end+i+1)))
     return points,faces,colour
 
 
-def _leaves(centre,size,colour):
-    x,y,z=centre;rx,ry,rz=size
-    points=[(x-rx,y,z),(x+rx,y,z),(x,y-ry,z),(x,y+ry,z),(x,y,z-rz),(x,y,z+rz)]
-    faces=[(3,0,4),(3,4,1),(3,1,5),(3,5,0),(2,4,0),(2,1,4),(2,5,1),(2,0,5)]
-    return points,faces,colour
+def _mix(a,b,t):return tuple(x+(y-x)*t for x,y in zip(a,b))
+
+
+def _leaf(base,angle,lift,length,width,colour):
+    dx,dz=math.sin(angle),math.cos(angle)
+    x,y,z=base
+    mid=(x+dx*length*.48,y+lift*length*.48,z+dz*length*.48)
+    points=[base,(mid[0]+dz*width,mid[1],mid[2]-dx*width),
+            (x+dx*length,y+lift*length-.06,z+dz*length),
+            (mid[0]-dz*width,mid[1]-width*.3,mid[2]+dx*width)]
+    return points,[(0,1,2),(0,2,3)],colour
 
 
 def forest_tree(position,seed,height=6.5,radius=.35,density=.5):
     rng=random.Random(seed)
-    bark=(rng.randint(98,112),rng.randint(67,80),rng.randint(38,49))
-    trunk=lathe([(0,radius),(height*.36,radius*.82),(height*.8,radius*.5),(height,.07)],bark,6)
-    crown_width=rng.uniform(2.1,3.05)
-    crown=lathe([(height*.60,.25),(height*.72,crown_width*.83),
-                 (height*.87,crown_width),(height*.99,crown_width*.62),(height+rng.uniform(.3,.7),0)],
-                (34,rng.randint(92,120),49),7)
-    turn=rng.random()*math.tau
-    crown.vertices=[(x*(1+.13*math.sin(i*1.7+turn)),y,z*rng.uniform(.86,1.12)) for i,(x,y,z) in enumerate(crown.vertices)]
-    wood,leaves=[],[]
-    for i in range(rng.randint(6,9)):
-        angle=turn+i*2.39996+rng.uniform(-.35,.35)
-        origin=(0,height*rng.uniform(.43,.77),0)
-        reach=crown_width*rng.uniform(.65,1.0)
-        end=(math.sin(angle)*reach,height*rng.uniform(.70,.98),math.cos(angle)*reach)
-        wood.append(_branch(origin,end,radius*rng.uniform(.24,.39),bark,4))
+    bark=(rng.randint(89,114),rng.randint(65,83),rng.randint(40,56))
+    turn=rng.uniform(0,math.tau);lean=rng.uniform(.12,.5)
+    centres=[(math.sin(turn+t)*lean*t,height*t,math.cos(turn+t)*lean*t)
+             for t in (0,.2,.4,.6,.8,1)]
+    trunk=_merge([_tube(centres,[radius*v for v in (1,.87,.68,.46,.23,.04)],bark,7)],bark)
+    wood,lit,shade=[],[],[]
+    spread=rng.uniform(.29,.44)*height
+    lift=rng.uniform(.15,.32)*height
+    crown_base=rng.uniform(.30,.49);crown_taper=rng.uniform(-.1,.45)
+    limbs=rng.randint(6,8)
+    for i in range(limbs):
+        angle=turn+i*2.399963+rng.uniform(-.4,.4)
+        t=min(.92,crown_base+(.9-crown_base)*i/(limbs-1)+rng.uniform(-.025,.025))
+        ring=min(4,int(t*5));root=_mix(centres[ring],centres[ring+1],t*5-ring)
+        reach=spread*rng.uniform(.7,1.)*(1-crown_taper*(i/(limbs-1)))
+        end=(root[0]+math.sin(angle)*reach,root[1]+lift*rng.uniform(.65,1.15),root[2]+math.cos(angle)*reach)
+        middle=_mix(root,end,.5);middle=(middle[0],middle[1]-.18,middle[2])
+        width=radius*(1-t)*.65
+        wood.append(_tube([root,middle,end],[width,width*.57,width*.13],bark,3))
         for sign in (-1,1):
-            fork_angle=angle+sign*rng.uniform(.35,.85)
-            tip=(end[0]+math.sin(fork_angle)*rng.uniform(.45,.85),end[1]+rng.uniform(.05,.6),end[2]+math.cos(fork_angle)*rng.uniform(.45,.85))
-            wood.append(_branch(end,tip,radius*.14,bark))
-            twig=(tip[0]+math.sin(fork_angle+.5)*.38,tip[1]+rng.uniform(.15,.4),tip[2]+math.cos(fork_angle+.5)*.38)
-            wood.append(_branch(tip,twig,radius*.055,bark))
-            tint=(rng.randint(39,62),rng.randint(105,143),rng.randint(48,72))
-            leaves.append(_leaves(twig,(rng.uniform(.35,.65),rng.uniform(.18,.35),rng.uniform(.35,.65)),tint))
-            leaves.append(_leaves(tip,(rng.uniform(.5,.8),rng.uniform(.25,.45),rng.uniform(.5,.8)),tint))
-    branches=_merge(wood,bark);foliage=_merge(leaves,(48,121,60))
-    # Four meshes per tree. The branches get a family tree, not a draw-call army.
-    for mesh in (trunk,branches,crown,foliage):mesh.position=position
-    return [trunk,branches,crown,foliage]
+            fork_angle=angle+sign*rng.uniform(.45,.9)
+            start=_mix(middle,end,rng.uniform(.35,.65))
+            tip=(end[0]+math.sin(fork_angle)*reach*.32,end[1]+rng.uniform(.25,.7),end[2]+math.cos(fork_angle)*reach*.32)
+            wood.append(_tube([start,_mix(start,tip,.5),tip],[width*.42,width*.23,width*.05],bark,3))
+            for j in range(3):
+                base=_mix(start,tip,.4+j*.3)
+                heading=fork_angle+(-1 if j%2 else 1)*rng.uniform(.55,1.25)
+                shoot=(base[0]+math.sin(heading)*rng.uniform(.45,.7),base[1]+rng.uniform(.15,.45),base[2]+math.cos(heading)*rng.uniform(.45,.7))
+                wood.append(_tube([base,shoot],[width*.13,width*.015],bark,3))
+                # Leaves grow on shoots. The giant green potato has been evicted.
+                for k in range(3):
+                    petiole=_mix(base,shoot,.25+k*.35)
+                    for side in (-1,1):
+                        direction=heading+side*rng.uniform(.65,1.35)
+                        colour=(32+int(rng.random()*27),99+int(rng.random()*44)+int(density*8),34+int(rng.random()*30))
+                        blade=_leaf(petiole,direction,rng.uniform(-.15,.5),rng.uniform(.48,.8),rng.uniform(.13,.23),colour)
+                        (lit if (i+j+k)%2 else shade).append(blade)
+    branches=_merge(wood,bark)
+    foliage=[_merge(lit,(46,126,49)),_merge(shade,(36,108,43))]
+    for mesh in (trunk,branches,*foliage):mesh.position=position
+    return [trunk,branches,*foliage]

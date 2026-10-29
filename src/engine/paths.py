@@ -28,7 +28,7 @@ def curve(anchors):
 class PathNetwork:
     half_width = 2.1
 
-    def __init__(self, seed=42):
+    def __init__(self, seed=42, finish_distance=None):
         rng = random.Random(seed)
         anchors = [(-24, 25), (-19, 17), (-9, 17), (-5, 9), (-13, 1),
                    (-7, -9), (5, -10), (14, -17), (8, -26), (24, -27)]
@@ -36,15 +36,32 @@ class PathNetwork:
                    (p[0] + rng.uniform(-1, 1), p[1] + rng.uniform(-1, 1))
                    for i, p in enumerate(anchors)]
         self.route = curve(anchors)
+        if finish_distance is not None:
+            x,z=self.route[-1]
+            self.route.extend(curve([(x,z),(x+15,z-12),(x+6,z-30),
+                                     (x+24,z-44),(x+12,z-64),(x+32,z-80)])[1:])
         self.lengths = [0.0]
         for a, b in zip(self.route, self.route[1:]):
             self.lengths.append(self.lengths[-1] + math.dist(a, b))
+        if finish_distance is not None:
+            end=self.at(finish_distance)
+            index=bisect_left(self.lengths,finish_distance)
+            self.route=self.route[:index]+[end]
+            self.lengths=self.lengths[:index]+[finish_distance]
         self.branches = [curve([self.route[30], (4, 20), (14, 14)]),
                          curve([self.route[75], (-22, -16), (-26, -24)])]
         self.segments = [(a, b) for line in [self.route, *self.branches]
                          for a, b in zip(line, line[1:])]
+        if finish_distance is not None:
+            self._grid={}
+            for a,b in self.segments:
+                for ix in range(math.floor(min(a[0],b[0])/8),math.floor(max(a[0],b[0])/8)+1):
+                    for iz in range(math.floor(min(a[1],b[1])/8),math.floor(max(a[1],b[1])/8)+1):
+                        self._grid.setdefault((ix,iz),[]).append((a,b))
 
     def distance(self, x, z):
+        if hasattr(self,'_grid'):
+            return min((segment_distance(x,z,*edge) for edge in self.nearby_segments(x,z)),default=32.)
         return min(segment_distance(x, z, a, b) for a, b in self.segments)
 
     def visual_width(self, x, z):
@@ -65,6 +82,9 @@ class PathNetwork:
         return min(range(len(self.route)), key=lambda i: math.hypot(x-self.route[i][0], z-self.route[i][1]))
 
     def nearby_segments(self,x,z):
+        if hasattr(self,'_grid'):
+            ix,iz=math.floor(x/8),math.floor(z/8)
+            return [edge for dx in (-1,0,1) for dz in (-1,0,1) for edge in self._grid.get((ix+dx,iz+dz),())]
         return sorted(self.segments,key=lambda edge:segment_distance(x,z,*edge))[:12]
 
     def samples(self, spacing=.25):
