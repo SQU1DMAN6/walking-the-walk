@@ -34,7 +34,7 @@ INSTRUCTIONS = {
     Stage.MOVEMENT: ("LET'S ROLL", 'Press [W, A, S, D] to move along the path.'),
     Stage.LOOK: ('LOOK AROUND', 'Move the mouse to look around.'),
     Stage.SUPPLIES: ('FIND SUPPLIES', 'Follow yellow arrows. Press [F] near the can and bottle.'),
-    Stage.CONSUME: ('USE SUPPLIES', 'Select food or water, then hold [E]: +10 health.'),
+    Stage.CONSUME: ('USE SUPPLIES', 'Select food or water, then hold [E] to use. Using this item adds 10 health.'),
     Stage.COMPASS: ('CRAFT A COMPASS', 'Press [C]. Choose Compass, then [Enter] to craft.'),
     Stage.MATERIALS: ('GATHER MATERIALS', 'Press [F] near the arrows. Pick up 2 sticks and 1 rock.'),
     Stage.SPEAR: ('CRAFT A SPEAR', 'Press [C]. Choose Stone spear, then [Enter] to craft.'),
