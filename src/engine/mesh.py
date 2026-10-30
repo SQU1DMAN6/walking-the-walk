@@ -29,8 +29,14 @@ class MeshPose:
     def __init__(self,source,rotations=(),translation=(0,0,0)):
         self.source,self.rotations,self.translation = source,rotations,translation
         self.position = (0,0,0)
-        self.faces,self.colour = source.faces,source.colour
-        self.texcoords,self.vertex_colours,self.alpha = source.texcoords,source.vertex_colours,source.alpha
+        self.colour = source.colour
+        self.texcoords,self.alpha = source.texcoords,source.alpha
+
+    @property
+    def faces(self):return self.source.faces
+
+    @property
+    def vertex_colours(self):return self.source.vertex_colours
 
     @property
     def vertices(self):

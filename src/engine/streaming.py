@@ -12,6 +12,7 @@ from engine.trees import forest_tree
 from engine.run_config import RIDGE_RADIUS, ARENA_RADIUS
 from engine.paths import segment_distance
 from engine.worldgen import create_branch, create_spinifex
+from engine.preload import checkpoint
 
 
 CHUNK_SIZE = 32
@@ -87,6 +88,7 @@ class ForestStreaming:
         return .5+.28*math.sin(x*.041+seed)*math.cos(z*.036-seed*.2)+.2*math.sin(z*.071+x*.02)
 
     def generate_chunk(self, key, safe_fallback=False):
+        checkpoint()
         started = time.perf_counter()
         cx, cz = key
         rng = random.Random((self.seed*73856093 ^ cx*19349663 ^ cz*83492791) & 0xffffffffffffffff)
@@ -122,6 +124,7 @@ class ForestStreaming:
             chunk.obstacles.append(Obstacle(x,z,RIDGE_RADIUS,'ridge'))
             chunk.details.append(('ridge',x,z,False))
         for index in range(0 if safe_fallback else 80):
+            checkpoint()
             x, z = minx+rng.uniform(1,31), minz+rng.uniform(1,31)
             density = self._density(x,z)
             if rng.random() > density*.85 or self.paths.distance(x,z) < self.paths.half_width+1 or clearing(x,z,1):

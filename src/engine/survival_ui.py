@@ -12,6 +12,7 @@ CONTROLS = ('WASD: move','Mouse: look','Shift: sprint','F: use / chop','1-9: slo
 class SurvivalHUD(TutorialHUD):
     def prompt_rect(self,level,width,height,bottom):
         prompt = level.world_prompt()
+        if prompt is None:return None
         if prompt and prompt.target_id==level.beacon_id:
             w = min(440,width-48)
             lines = self.lines(prompt.text,w-24,self.small_font)
@@ -40,7 +41,7 @@ class SurvivalHUD(TutorialHUD):
         panel, _, _ = SurvivalHUD.crafting_layout(width, height)
         return pygame.Rect(panel.right-238, panel.y+14, 220, 48)
 
-    def crafting_menu(self, surface, level, width, height):
+    def crafting_menu(self, surface, level, width, height, show_reason=True):
         surface.fill((5, 15, 13, 230))
         panel, rows, button = self.crafting_layout(width, height)
         self.panel(surface, panel)
@@ -60,7 +61,7 @@ class SurvivalHUD(TutorialHUD):
         success = level.effects.latest('crafted')
         success = success and success.detail == recipe
         if success:reason = 'Crafted. Close [C]'
-        self.wrapped(surface, reason, button.x, y+14, button.width, font=self.small_font)
+        if show_reason:self.wrapped(surface,reason,button.x,y+14,button.width,font=self.small_font)
         label = 'Crafted!' if success else 'Craft [Enter]' if ready else 'Not ready'
         self.button(surface, button, label, enabled=ready)
         self.text(surface, '[Up/Down] choose | [C]/[Esc] back', panel.centerx, panel.bottom-30,
@@ -167,9 +168,7 @@ class SurvivalHUD(TutorialHUD):
         compact=cells[0].y!=cells[5].y
         names = {'food':'Food', 'water':'Water', 'metal_scrap':'Metal', 'plastic_scrap':'Plastic',
                  'stick':'Stick', 'rock':'Stone', 'compass':'Compass', 'spear':'Spear', 'axe':'Axe', 'leaves':'Leaves', 'bandage':'Bandage'}
-        for i,rect in enumerate(cells):
-            self.panel(overlay,rect,level.inventory.selected_slot==i)
-            self.slot_contents(overlay,rect,i,level.inventory.slots[i] if i<9 else None,names)
+        self.draw_hotbar(overlay,level,width,height,names)
         selected = self.selected_text(level)
         y = cells[0].top-16-len(self.lines(selected, width-56, self.small_font))*(self.small_font.size('A')[1]+4)
         self.panel(overlay, (16, y, width-32, cells[0].top-y-8))

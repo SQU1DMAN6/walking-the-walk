@@ -1,5 +1,8 @@
 import math
 import random
+import numpy as np
+
+from engine.foliage import LeafCloud,BranchCloud
 
 from engine.mesh import Mesh
 
@@ -42,16 +45,6 @@ def _tube(centres,radii,colour,sides=5):
 def _mix(a,b,t):return tuple(x+(y-x)*t for x,y in zip(a,b))
 
 
-def _leaf(base,angle,lift,length,width,colour):
-    dx,dz=math.sin(angle),math.cos(angle)
-    x,y,z=base
-    mid=(x+dx*length*.48,y+lift*length*.48,z+dz*length*.48)
-    points=[base,(mid[0]+dz*width,mid[1],mid[2]-dx*width),
-            (x+dx*length,y+lift*length-.06,z+dz*length),
-            (mid[0]-dz*width,mid[1]-width*.3,mid[2]+dx*width)]
-    return points,[(0,1,2),(0,2,3)],colour
-
-
 def forest_tree(position,seed,height=6.5,radius=.35,density=.5):
     rng=random.Random(seed)
     bark=(rng.randint(89,114),rng.randint(65,83),rng.randint(40,56))
@@ -59,7 +52,10 @@ def forest_tree(position,seed,height=6.5,radius=.35,density=.5):
     centres=[(math.sin(turn+t)*lean*t,height*t,math.cos(turn+t)*lean*t)
              for t in (0,.2,.4,.6,.8,1)]
     trunk=_merge([_tube(centres,[radius*v for v in (1,.87,.68,.46,.23,.04)],bark,7)],bark)
-    wood,lit,shade=[],[],[]
+    wood,shoots=[],[]
+    def limb(points,radii,tier):
+        for a,b,r0,r1 in zip(points,points[1:],radii,radii[1:]):
+            wood.append((*a,*(y-x for x,y in zip(a,b)),r0,r1,tier,*bark))
     spread=rng.uniform(.29,.44)*height
     lift=rng.uniform(.15,.32)*height
     crown_base=rng.uniform(.30,.49);crown_taper=rng.uniform(-.1,.45)
@@ -72,26 +68,36 @@ def forest_tree(position,seed,height=6.5,radius=.35,density=.5):
         end=(root[0]+math.sin(angle)*reach,root[1]+lift*rng.uniform(.65,1.15),root[2]+math.cos(angle)*reach)
         middle=_mix(root,end,.5);middle=(middle[0],middle[1]-.18,middle[2])
         width=radius*(1-t)*.65
-        wood.append(_tube([root,middle,end],[width,width*.57,width*.13],bark,3))
-        for sign in (-1,1):
+        limb([root,middle,end],[width,width*.57,width*.13],0)
+        for sign in (-1,0,1):
             fork_angle=angle+sign*rng.uniform(.45,.9)
-            start=_mix(middle,end,rng.uniform(.35,.65))
-            tip=(end[0]+math.sin(fork_angle)*reach*.32,end[1]+rng.uniform(.25,.7),end[2]+math.cos(fork_angle)*reach*.32)
-            wood.append(_tube([start,_mix(start,tip,.5),tip],[width*.42,width*.23,width*.05],bark,3))
-            for j in range(3):
-                base=_mix(start,tip,.4+j*.3)
+            start=_mix(root,middle,.8) if sign==0 else _mix(middle,end,rng.uniform(.35,.65))
+            hub=middle if sign==0 else end
+            tip=(hub[0]+math.sin(fork_angle)*reach*.32,hub[1]+rng.uniform(.25,.7),hub[2]+math.cos(fork_angle)*reach*.32)
+            limb([start,_mix(start,tip,.5),tip],[width*.42,width*.23,width*.05],1)
+            for j in range(4):
+                base=_mix(start,tip,.25+j*.25)
                 heading=fork_angle+(-1 if j%2 else 1)*rng.uniform(.55,1.25)
                 shoot=(base[0]+math.sin(heading)*rng.uniform(.45,.7),base[1]+rng.uniform(.15,.45),base[2]+math.cos(heading)*rng.uniform(.45,.7))
-                wood.append(_tube([base,shoot],[width*.13,width*.015],bark,3))
-                # Leaves grow on shoots. The giant green potato has been evicted.
-                for k in range(3):
-                    petiole=_mix(base,shoot,.25+k*.35)
-                    for side in (-1,1):
-                        direction=heading+side*rng.uniform(.65,1.35)
-                        colour=(32+int(rng.random()*27),99+int(rng.random()*44)+int(density*8),34+int(rng.random()*30))
-                        blade=_leaf(petiole,direction,rng.uniform(-.15,.5),rng.uniform(.48,.8),rng.uniform(.13,.23),colour)
-                        (lit if (i+j+k)%2 else shade).append(blade)
-    branches=_merge(wood,bark)
-    foliage=[_merge(lit,(46,126,49)),_merge(shade,(36,108,43))]
-    for mesh in (trunk,branches,*foliage):mesh.position=position
+                limb([base,shoot],[width*.13,width*.015],2)
+                shoots.append((base,shoot,heading))
+    branches=BranchCloud(wood,position)
+    # One instance per leaf. The GPU handles the origami.
+    leaf_rng=np.random.default_rng(seed & 0xffffffffffffffff)
+    count=len(shoots)*10
+    starts=np.repeat(np.array([v[0] for v in shoots]),10,axis=0)
+    ends=np.repeat(np.array([v[1] for v in shoots]),10,axis=0)
+    headings=np.repeat(np.array([v[2] for v in shoots]),10)
+    t=np.tile(np.repeat(np.linspace(.15,.95,5),2),len(shoots))
+    bases=starts+(ends-starts)*t[:,None]
+    angles=headings+np.tile([-1,1],count//2)*leaf_rng.uniform(.5,1.5,count)
+    lengths=leaf_rng.uniform(.5,.85,count)
+    axes=np.column_stack((np.sin(angles)*lengths,leaf_rng.uniform(-.15,.5,count)*lengths,np.cos(angles)*lengths))
+    widths=leaf_rng.uniform(.16,.27,count)
+    sides=np.column_stack((np.cos(angles)*widths,leaf_rng.uniform(-.2,.2,count)*widths,-np.sin(angles)*widths))
+    colours=leaf_rng.uniform((32,105+int(density*8),34),(62,155+int(density*8),67),(count,3))
+    instances=np.column_stack((bases,axes,sides,colours)).astype(np.float32)
+    instances=instances[leaf_rng.permutation(count)]
+    foliage=[LeafCloud(instances[::2],position),LeafCloud(instances[1::2],position)]
+    trunk.position=position
     return [trunk,branches,*foliage]

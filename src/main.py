@@ -2,6 +2,7 @@ import argparse
 import copy
 import json
 import math
+import signal
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -10,7 +11,7 @@ from OpenGL import GL as gl
 from engine.camera import Camera
 from engine.level1 import Stage
 from engine.tutorial import TutorialRun as Level1
-from engine.opengl_renderer import OpenGLRenderer, build_batches, upload_batches
+from engine.opengl_renderer import OpenGLRenderer, build_batches, upload_batches, release_batches
 from engine.ui import TutorialHUD
 from engine.screenshot import save_png
 from engine.input import PointerCapture
@@ -20,7 +21,8 @@ from engine.menu import MenuFlow, Screen
 from engine.survival import SurvivalRun
 from engine.survival_ui import SurvivalHUD
 from engine.workshop_ui import ExpandedTutorialHUD
-from engine.run_config import RunSeeds
+from engine.run_config import RunSeeds,RunConfig
+from engine.preload import WorldPreloader
 
 
 SKY_COLOUR = (.36, .65, .88)
@@ -52,9 +54,9 @@ def render_scene(renderer, level, batches):
     renderer.render_frame(camera, batches)
     instances = []
     for entity in level.entities.all():
+        if not entity.visible or (entity.kind=='tree' and not entity.meshes):continue
         distance = entity.distance_to(camera.x,camera.z)
-        if entity.visible and (not hasattr(level.world,'chunks') or
-                               (distance < 58 and renderer.visible(camera,entity.x,entity.y,entity.z,2))):
+        if not hasattr(level.world,'chunks') or (distance<58 and renderer.visible(camera,entity.x,entity.y,entity.z,2)):
             for mesh in entity.render_meshes:
 
                 mx, my, mz = mesh.position
@@ -66,8 +68,9 @@ def render_scene(renderer, level, batches):
     if getattr(level,'is_expanded_tutorial',False):
         arrow=level.ground_guidance()
         if arrow:renderer.render_mesh_dynamic(camera,arrow,0,0,0)
-    prompt = level.world_prompt()
-    for marker in level.objective_markers():
+    markers=level.objective_markers()
+    prompt=level.world_prompt() if any(marker.style=='arrow' for marker in markers) else None
+    for marker in markers:
         if prompt and marker.target_id == prompt.target_id and marker.style == 'arrow':
             continue
         pos = marker.position(level.entities, level.elapsed)
@@ -124,6 +127,11 @@ class Application:
         self.paused = False
         self.running = True
         self.just_started = False
+        self.preloader=None
+        self._boot_visible=False
+        self._reserved_seed=None
+        self._tutorial_level=None
+        self._requested_key=None
 
     def return_to_title(self):
         self.pointer.set_active(False)
@@ -135,15 +143,17 @@ class Application:
             self.release_world()
         self.menu.back()
 
-    def release_world(self):
-        if self.level and hasattr(self.level.world,'close'):
+    def release_world(self,keep_tutorial=False):
+        if self.level and keep_tutorial and getattr(self.level,'is_expanded_tutorial',False):
+            self._tutorial_level=self.level
+        elif self.level and hasattr(self.level.world,'close'):
             self.level.world.close()
         for _,batches in self.chunk_batches.values():
             if batches:
-                gl.glDeleteBuffers(len(batches),[b.vbo for b in batches])
+                release_batches(batches)
         self.chunk_batches.clear()
         if self.batches:
-            gl.glDeleteBuffers(len(self.batches), [batch.vbo for batch in self.batches])
+            release_batches(self.batches)
         if self.renderer:
             self.renderer.close()
         self.level, self.renderer, self.batches = None, None, []
@@ -290,11 +300,64 @@ class Application:
             elif self.pointer.active:
                 self.level.handle_attack()
 
+    def _activate_level(self,level):
+        self.renderer=OpenGLRenderer(self.width,self.height)
+        self.renderer.focal_length=self.width*.7
+        self.renderer.fog_color=SKY_COLOUR if hasattr(level.world,'chunks') else (.18,.28,.22)
+        self.renderer.fog_near,self.renderer.fog_far=(28,60) if hasattr(level.world,'chunks') else (24,68)
+        if hasattr(level.world,'chunks'):self.sync_chunks(level,initial=True)
+        else:self.batches=build_batches(level.world.meshes)
+        self.level=level
+        is_run=getattr(level,'is_survival',False)
+        self.hud.close();self.hud=SurvivalHUD() if is_run else ExpandedTutorialHUD();self.hud._intro_finished=True
+        self.menu.screen=Screen.RUN if is_run else Screen.TUTORIAL
+        self.render_revision=getattr(level.world,'render_revision',0)
+        print(json.dumps(dict(event='run_ready' if is_run else 'tutorial_ready',seed=level.seed,
+                              validation=level.world.validation,loaded_chunks=len(self.chunk_batches))),flush=True)
+
+    def _tick_preloader(self):
+        if self.preloader is None:self.preloader=WorldPreloader()
+        playing_run=self.menu.screen==Screen.RUN
+        if self._reserved_seed is None and not playing_run:self._reserved_seed=self.run_seeds.next()
+        main=(True,self._reserved_seed,self.menu.config) if self._reserved_seed is not None else None
+        tutorial=(False,self.tutorial_seed,RunConfig('Easy','Short'))
+        cached_tutorial=self._tutorial_level or (self.level if self.level and not getattr(self.level,'is_survival',False) else None)
+        if cached_tutorial:tutorial=None
+        loading=self.menu.screen==Screen.LOADING
+        requested=(main if self.menu.run_requested else tutorial) if loading else None
+        priority=requested if requested is not None else main or tutorial
+        if loading and requested!=self._requested_key:
+            self._requested_key=requested
+            self.preloader.errors.pop(requested,None)
+        elif not loading:self._requested_key=None
+        self.preloader.request((main,tutorial),priority);self.preloader.poll()
+        if not loading or not self.loading_visible or self.menu.error:return
+        level=None
+        try:
+            if not self.menu.run_requested and cached_tutorial:
+                if self.level is cached_tutorial:
+                    cached_tutorial.reset();self.menu.screen=Screen.TUTORIAL;return
+                level=cached_tutorial;self._tutorial_level=None;level.reset()
+            elif requested in self.preloader.errors:
+                raise RuntimeError(self.preloader.errors[requested])
+            else:level=self.preloader.take(requested)
+            if level is None:return
+            self.release_world(keep_tutorial=True)
+            self.seed=level.seed;self._activate_level(level)
+            if self.menu.run_requested:self._reserved_seed=None
+        except Exception as error:
+            if level and hasattr(level.world,'close'):level.world.close()
+            self.release_world()
+            self.menu.error="Couldn't load the jungle. Head back and try again."
+            print(json.dumps(dict(event='load_error',error=str(error))),flush=True)
+
     def update(self, dt):
         was_loading = self.menu.screen==Screen.LOADING
         self.just_started = False
         self.menu.elapsed += dt
-        if self.menu.screen == Screen.LOADING and self.loading_visible and not self.menu.error:
+        if self._boot_visible:
+            self._tick_preloader()
+        elif self.menu.screen == Screen.LOADING and self.loading_visible and not self.menu.error:
             if self.level and not self.menu.run_requested and not getattr(self.level, 'is_survival', False):
                 self.level.reset()
                 self.menu.screen = Screen.TUTORIAL
@@ -319,26 +382,7 @@ class Application:
                     level = None
                     try:
                         level = self.loading_future.result()
-                        self.renderer = OpenGLRenderer(self.width, self.height)
-                        self.renderer.focal_length = self.width*.7
-                        is_run = getattr(level,'is_survival',False)
-                        self.renderer.fog_color = SKY_COLOUR if hasattr(level.world,'chunks') else (.18,.28,.22)
-                        self.renderer.fog_near,self.renderer.fog_far = (28,60) if hasattr(level.world,'chunks') else (24,68)
-                        if hasattr(level.world,'chunks'):
-                            self.sync_chunks(level,initial=True)
-                        else:
-                            self.batches = build_batches(level.world.meshes)
-                        self.level = level
-                        is_run = getattr(level, 'is_survival', False)
-                        self.hud.close()
-                        self.hud = SurvivalHUD() if is_run else ExpandedTutorialHUD()
-                        self.hud._intro_finished = True
-                        self.menu.screen = Screen.RUN if is_run else Screen.TUTORIAL
-                        self.render_revision = getattr(level.world, 'render_revision', 0)
-                        print(json.dumps({'event': 'run_ready' if is_run else 'tutorial_ready', 'seed': self.seed,
-                                          'validation': level.world.validation,
-                                          'batches': len(self.batches)+sum(len(bs) for _,bs in self.chunk_batches.values()),
-                                          'loaded_chunks':len(self.chunk_batches)}), flush=True)
+                        self._activate_level(level)
                     except Exception as error:
                         self.release_world()
                         if level and hasattr(level.world,'close'):
@@ -370,6 +414,7 @@ class Application:
 
     def render(self, fps=0):
         if self.menu.screen in (Screen.TUTORIAL, Screen.RUN):
+            self.renderer.scene_target.begin(self.width,self.height)
             revision = getattr(self.level.world, 'render_revision', 0)
             if hasattr(self.level.world,'chunks'):
                 self.sync_chunks(self.level)
@@ -384,13 +429,15 @@ class Application:
                 old = self.batches
                 self.batches = build_batches(self.level.world.meshes)
                 if old:
-                    gl.glDeleteBuffers(len(old), [batch.vbo for batch in old])
+                    release_batches(old)
                 self.render_revision = revision
             if not hasattr(self.level.world,'chunks'):
                 render_scene(self.renderer, self.level, self.batches)
+            self.renderer.scene_target.end(self.width,self.height)
             self.hud.draw(self.level, self.width, self.height, fps, paused=self.paused)
         else:
             self.hud.draw_menu(self.menu, self.width, self.height)
+            if self.menu.screen==Screen.TITLE:self._boot_visible=True
             if self.menu.screen == Screen.LOADING:
                 self.loading_visible = True
 
@@ -398,7 +445,7 @@ class Application:
         chunks = level.world.chunks
         for key in self.chunk_batches.keys()-chunks.keys():
             _,old = self.chunk_batches.pop(key)
-            gl.glDeleteBuffers(len(old),[b.vbo for b in old])
+            release_batches(old)
         pending = [chunk for key,chunk in chunks.items()
                    if key not in self.chunk_batches or self.chunk_batches[key][0] != chunk.revision]
         pending.sort(key=lambda c:math.hypot((c.key[0]+.5)*32-level.camera.x,(c.key[1]+.5)*32-level.camera.z))
@@ -408,11 +455,13 @@ class Application:
             old = self.chunk_batches.get(chunk.key)
             self.chunk_batches[chunk.key] = chunk.revision,batches
             if old:
-                gl.glDeleteBuffers(len(old[1]),[b.vbo for b in old[1]])
+                release_batches(old[1])
             self.upload_times.append((time.perf_counter()-started)*1000)
             self.upload_times = self.upload_times[-128:]
 
     def close(self):
+        if self.preloader:self.preloader.close()
+        if self._tutorial_level and self._tutorial_level is not self.level:self._tutorial_level.world.close()
         self.pointer.set_active(False)
         self.hud.close()
         if self.executor:
@@ -443,6 +492,7 @@ def main(argv=None):
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_COMPATIBILITY)
     width, height = create_display(args)
     app = Application(width, height, args.seed, args.smoke_test)
+    previous_term=signal.signal(signal.SIGTERM,lambda *_:setattr(app,'running',False))
     clock = pygame.time.Clock()
     frames, last_report = 0, time.monotonic()
     try:
@@ -477,6 +527,7 @@ def main(argv=None):
     finally:
         app.close()
         pygame.quit()
+        signal.signal(signal.SIGTERM,previous_term)
     return 0
 
 

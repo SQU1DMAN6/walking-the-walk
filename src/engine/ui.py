@@ -58,8 +58,28 @@ class TutorialHUD:
             rendered = font.render(text, True, colour)
             if len(self._text_cache) > 256:
                 self._text_cache.clear()
+            if pygame.display.get_surface() is not None:
+                rendered=rendered.convert_alpha()
+                rendered.set_alpha(255,pygame.RLEACCEL)
             self._text_cache[key] = rendered
         surface.blit(rendered, (x-rendered.get_width()//2 if center else x, y))
+
+    def draw_hotbar(self,surface,level,width,height,names,empty_labels=False):
+        key=(width,height,tuple(level.inventory.slots),level.inventory.selected_slot,empty_labels,self.slot_font.scale)
+        if getattr(self,'_hotbar_key',None)!=key:
+            self._hotbar_key=key
+            cells=self.hotbar_layout(width,height)
+            bounds=cells[0].unionall(cells[1:])
+            self._hotbar_origin=bounds.topleft
+            cached=pygame.Surface(bounds.size,pygame.SRCALPHA)
+            for i,cell in enumerate(cells):
+                rect=cell.move(-bounds.x,-bounds.y)
+                self.panel(cached,rect,level.inventory.selected_slot==i)
+                self.slot_contents(cached,rect,i,level.inventory.slots[i] if i<9 else None,names,empty_labels)
+            if pygame.display.get_surface() is not None:cached=cached.convert_alpha()
+            cached.set_alpha(255,pygame.RLEACCEL)
+            self._hotbar_surface=cached
+        surface.blit(self._hotbar_surface,self._hotbar_origin)
 
     @staticmethod
     def panel(surface, rect, selected=False):
@@ -559,7 +579,7 @@ class TutorialHUD:
 
     def lesson_body(self,level,compact,progress):
         if not compact or progress==0 or level.in_beacon_ring:return level.instruction[1]
-        return {Stage.MOVEMENT:'Follow the path with [WASD]',Stage.LOOK:'Look around with the mouse',
+        return {Stage.MOVEMENT:'Follow the path with [W] [A] [S] and [D]',Stage.LOOK:'Look around with the mouse',
                 Stage.SUPPLIES:'Collect both supplies with [F]',Stage.CONSUME:'Select food/water; hold [E]',
                 Stage.COMPASS:'Craft a compass in [C]',Stage.MATERIALS:'[F]: 2 sticks, 1 rock',
                 Stage.SPEAR:'Craft a spear in [C]',Stage.COMBAT:'Hold spear; click to attack',
@@ -748,9 +768,10 @@ class TutorialHUD:
     def present(self, surface):
         from OpenGL import GL as gl
         width, height = surface.get_size()
-        data = pygame.image.tobytes(surface, 'RGBA', True)
+        data=pygame.image.tobytes(surface,'RGBA',True)
         if self.texture is None:
             self.texture = gl.glGenTextures(1)
+            self._texture_size=None
         gl.glUseProgram(0)
         gl.glBindVertexArray(0)
         gl.glDisable(gl.GL_DEPTH_TEST)
@@ -758,9 +779,12 @@ class TutorialHUD:
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
         gl.glEnable(gl.GL_TEXTURE_2D)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, width, height, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, data)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        if self._texture_size!=(width,height):
+            gl.glTexImage2D(gl.GL_TEXTURE_2D,0,gl.GL_RGBA,width,height,0,gl.GL_RGBA,gl.GL_UNSIGNED_BYTE,None)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D,gl.GL_TEXTURE_MIN_FILTER,gl.GL_LINEAR)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D,gl.GL_TEXTURE_MAG_FILTER,gl.GL_LINEAR)
+            self._texture_size=width,height
+        gl.glTexSubImage2D(gl.GL_TEXTURE_2D,0,0,0,width,height,gl.GL_RGBA,gl.GL_UNSIGNED_BYTE,data)
         gl.glMatrixMode(gl.GL_PROJECTION)
         gl.glPushMatrix()
         gl.glLoadIdentity()
@@ -770,9 +794,9 @@ class TutorialHUD:
         gl.glLoadIdentity()
         gl.glColor4f(1, 1, 1, 1)
         gl.glBegin(gl.GL_QUADS)
-        for u, v, x, y in [(0, 1, 0, 0), (1, 1, width, 0), (1, 0, width, height), (0, 0, 0, height)]:
-            gl.glTexCoord2f(u, v)
-            gl.glVertex2f(x, y)
+        for u,v,x,y in ((0,1,0,0),(1,1,width,0),(1,0,width,height),(0,0,0,height)):
+            gl.glTexCoord2f(u,v)
+            gl.glVertex2f(x,y)
         gl.glEnd()
         gl.glPopMatrix()
         gl.glMatrixMode(gl.GL_PROJECTION)

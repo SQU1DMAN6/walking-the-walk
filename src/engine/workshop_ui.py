@@ -18,10 +18,10 @@ class ExpandedTutorialHUD(SurvivalHUD):
     def pointer(surface,start,target,colour=(255,229,123)):
         dx,dy=target[0]-start[0],target[1]-start[1]
         length=max(1.,math.hypot(dx,dy));ux,uy=dx/length,dy/length
-        pygame.draw.line(surface,(15,24,19),start,target,7)
-        pygame.draw.line(surface,colour,start,target,3)
-        points=[target,(target[0]-ux*14-uy*7,target[1]-uy*14+ux*7),
-                       (target[0]-ux*14+uy*7,target[1]-uy*14-ux*7)]
+        pygame.draw.line(surface,(15,24,19),start,target,11)
+        pygame.draw.line(surface,colour,start,target,6)
+        points=[target,(target[0]-ux*24-uy*12,target[1]-uy*24+ux*12),
+                       (target[0]-ux*24+uy*12,target[1]-uy*24-ux*12)]
         pygame.draw.polygon(surface,colour,points)
         pygame.draw.lines(surface,(15,24,19),True,points,2)
 
@@ -68,9 +68,7 @@ class ExpandedTutorialHUD(SurvivalHUD):
         cells = self.hotbar_layout(width, height)
         names = {'food':'Food','water':'Water','metal_scrap':'Metal','plastic_scrap':'Plastic',
                  'compass':'Compass','spear':'Spear','stick':'Stick','rock':'Rock','axe':'Axe','leaves':'Leaves','bandage':'Bandage'}
-        for i, rect in enumerate(cells):
-            self.panel(overlay, rect, i == level.inventory.selected_slot)
-            self.slot_contents(overlay, rect, i, level.inventory.slots[i] if i < 9 else None, names, True)
+        self.draw_hotbar(overlay,level,width,height,names,True)
         coach = level.action_coach() if not (paused or level.crafting_open or level.help_open) else None
         if coach and coach.slot is not None:
             pygame.draw.rect(overlay, (255, 229, 123), cells[coach.slot], 3, border_radius=8)
@@ -113,7 +111,8 @@ class ExpandedTutorialHUD(SurvivalHUD):
             self.damage_indicator(overlay, level, width, height)
             if coach and coach.slot is not None:
                 cell=cells[coach.slot]
-                self.pointer(overlay,(cell.right-18,cell.top+4),(cell.right-18,cell.top+32))
+                start=(max(lesson.left+18,min(lesson.right-18,cell.centerx)),lesson.bottom+3)
+                self.pointer(overlay,start,(cell.centerx,cell.top+12))
         gap = controls.left-vitals.right-24
         if level.active and gap >= 320 and level.notification_timer > 0 and not level.crafting_open:
             lines = self.lines(level.notification, gap-20, self.small_font)
@@ -134,13 +133,15 @@ class ExpandedTutorialHUD(SurvivalHUD):
             self._lesson_key, self._lesson_since = key, level.elapsed
         return 0. if level.in_beacon_ring else ease((level.elapsed-self._lesson_since-1.5)/.45)
 
-    def lesson_body(self, level, compact, progress):
+    def lesson_body(self, level, compact, progress=None):
         if level.in_beacon_ring:return 'Press [F] to finish the tutorial.'
+        coach=level.action_coach()
+        if coach and coach.slot is not None:return coach.text
         if not compact:return level.instruction[1]
         if level.lesson == Lesson.TREE and level.tree_falls.live:return 'Tree falling away. Leaves soon.'
         if level.lesson in (Lesson.TREE,Lesson.USE,Lesson.BANDAGE):return level.instruction[1]
         return {
-            Lesson.MOVEMENT:'Use [WASD] to follow the path.',
+            Lesson.MOVEMENT:'Use [W] [A] [S] and [D] to follow the path.',
             Lesson.LOOK:'Move the mouse to look around.',
             Lesson.SUPPLIES:'Press [F] to collect supplies.',
             Lesson.CONSUME:'Select food or water. Hold [E].',
@@ -160,14 +161,14 @@ class ExpandedTutorialHUD(SurvivalHUD):
         w = round(min(width-32, 900)*(1-.08*progress))
         cells = self.hotbar_layout(width, height)
         compact = cells[0].y != cells[5].y
-        body = self.lesson_body(level, compact, progress)
+        body = self.lesson_body(level, compact)
         h = 24+title.size('A')[1]+len(self.lines(body, w-32, font))*(font.size('A')[1]+4)
         if height < 600:
             initial_font, initial_title = self.lesson_fonts(0)
-            initial_body = self.lesson_body(level, compact, 0)
+            initial_body = self.lesson_body(level, compact)
             initial_height = 24+initial_title.size('A')[1]+len(self.lines(initial_body, min(width-32, 900)-32, initial_font))*(initial_font.size('A')[1]+4)
             final_font, _ = self.lesson_fonts(1)
-            final_body=self.lesson_body(level,compact,1)
+            final_body=self.lesson_body(level,compact)
             final_height=len(self.lines(final_body,round(min(width-32,900)*.92)-24,final_font))*(final_font.size('A')[1]+4)+12
             h = round(initial_height+(final_height-initial_height)*progress)
             central = height//2-initial_height//2
@@ -175,7 +176,12 @@ class ExpandedTutorialHUD(SurvivalHUD):
         else:
             central = height//2-h//2
             settled = cells[0].top-h-32
-        return pygame.Rect((width-w)//2, round(central+(settled-central)*progress), w, h)
+        x=(width-w)//2
+        coach=level.action_coach()
+        if coach and coach.slot is not None:
+            aligned=max(16,min(width-w-16,cells[coach.slot].centerx-w//2))
+            x=round(x+(aligned-x)*progress)
+        return pygame.Rect(x, round(central+(settled-central)*progress), w, h)
 
     def lesson_panel(self, surface, level, rect):
         progress = self.lesson_progress(level)
@@ -187,13 +193,13 @@ class ExpandedTutorialHUD(SurvivalHUD):
         border = tuple(round(a+(b-a)*progress) for a, b in zip(border, (248, 221, 122, 255)))
         pygame.draw.rect(surface, background, rect, border_radius=9)
         pygame.draw.rect(surface, border, rect, 3, border_radius=9)
-        body = self.lesson_body(level, True, progress)
+        body = self.lesson_body(level, True)
         line_count=len(self.lines(body,rect.width-24,font))
         self.wrapped(surface, body, rect.centerx, rect.centery-line_count*(font.size('A')[1]+4)//2, rect.width-24,
                      (247, 241, 229), font, True)
 
     def crafting_menu(self, surface, level, width, height):
-        super().crafting_menu(surface, level, width, height)
+        super().crafting_menu(surface,level,width,height,show_reason=False)
         coach = level.action_coach()
         if coach is None:return
         _, rows, button = self.crafting_layout(width, height)
@@ -202,12 +208,18 @@ class ExpandedTutorialHUD(SurvivalHUD):
             target = rows[level.recipes.index(level.expected_recipe)]
         else:target = button
         pygame.draw.rect(surface, (255, 229, 123), target, 3, border_radius=8)
+        lines=self.lines(coach.text,button.width-24,self.small_font)
+        label=pygame.Rect(button.x,0,button.width,16+len(lines)*(self.small_font.size('A')[1]+4))
+        label.bottom=button.top-50
+        self.panel(surface,label,True)
+        self.wrapped(surface,coach.text,label.centerx,label.top+8,label.width-24,
+                     (255,235,155),self.small_font,True)
         if coach.kind=='recipe':
-            self.pointer(surface,(target.right+20,target.centery),(target.right-4,target.centery))
+            self.pointer(surface,label.midleft,(target.right-4,target.centery))
         elif coach.kind=='close':
-            self.pointer(surface,(target.right-18,target.bottom+25),(target.right-18,target.bottom-4))
+            self.pointer(surface,(label.right-16,label.top),(target.right-18,target.bottom-4))
         else:
-            self.pointer(surface,(target.right-18,target.top-28),(target.right-18,target.top+5))
+            self.pointer(surface,label.midbottom,(target.centerx,target.top+5))
 
     def overlay_menu(self, surface, level, width, height, paused):
         shade = pygame.Surface((width, height), pygame.SRCALPHA)

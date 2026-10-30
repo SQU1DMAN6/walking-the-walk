@@ -371,13 +371,13 @@ class SurvivalRun(Level1):
                 and self.world.line_clear(self.camera.x,self.camera.z,beacon.x,beacon.z,.1)):
             return beacon
         choices = []
+        axe_held=self.inventory.selected_item=='axe'
         for target in self.entities.all():
             if not target.interactable or not target.visible or (allowed is not None and not allowed(target)):
                 continue
+            if target.kind=='tree' and not axe_held:continue
             distance = target.distance_to(self.camera.x, self.camera.z)
             if target.kind == 'tree':
-                if self.inventory.selected_item != 'axe':
-                    continue
                 distance = max(0, distance-target.site.obstacle.radius)
                 if distance > WEAPONS['axe']['range'] or self._facing(target) < .7:
                     continue
