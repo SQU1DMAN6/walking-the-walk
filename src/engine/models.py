@@ -367,19 +367,31 @@ def pose_axe(meshes, remaining):
     from engine.animation import envelope
 
     motion = envelope(0.45 - max(0, remaining), 0, 0.18, 0.45)
-    posed = []
-    for mesh in meshes:
-        points = [
-            rotate_point(
-                tuple(a + b for a, b in zip(v, mesh.position)),
-                (0.45, -0.55, 0.65),
-                pitch=motion * 1.15,
-                yaw=-motion * 0.35,
-            )
-            for v in mesh.vertices
-        ]
-        posed.append(Mesh(points, mesh.faces, mesh.colour, (0, 0, motion * 0.15)))
-    return posed
+    return [
+        MeshPose(
+            mesh,
+            (((0.45, -0.55, 0.65), motion * 1.15, -motion * 0.35),),
+            (0, 0, motion * 0.15),
+        )
+        for mesh in meshes
+    ]
+
+
+def pose_chop(meshes, remaining):
+    from engine.animation import envelope
+
+    elapsed = 0.45 - max(0.0, min(0.45, remaining))
+    prepare = envelope(elapsed, 0, 0.07, 0.18)
+    strike = envelope(elapsed, 0.07, 0.18, 0.45)
+    pivot = (0.45, -0.55, 0.65)
+    return [
+        MeshPose(
+            mesh,
+            ((pivot, -0.06 * prepare + 0.10 * strike, 0.38 * prepare - 0.95 * strike),),
+            (0, -0.16 * strike, 0.12 * strike),
+        )
+        for mesh in meshes
+    ]
 
 
 def leaves():
@@ -528,6 +540,7 @@ def demon(phase=1):
                 ),
             ]
         )
+        parts[-1].leg = side
         arm = create_branch((side * 0.65, 2.1, 0), (side * 0.9, 1.4, 0.8), 0.24, skin)
         arm.arm = side
         parts.append(arm)
@@ -539,37 +552,69 @@ def demon(phase=1):
     return parts
 
 
-def pose_demon(meshes, state, time, phase, moving):
-    from engine.animation import envelope
+def pose_demon(
+    meshes, state, time, phase, moving, recovery_duration=1.0, last_attack="cleave"
+):
+    from engine.animation import ease
     from engine.run_config import BOSS
 
-    sweep = (
-        envelope(
-            time,
-            0,
-            BOSS["cleave"]["windup"],
-            BOSS["cleave"]["windup"] + BOSS["cleave"]["active"],
-        )
-        if state == "cleave"
-        else 0
-    )
-    raise_arms = (
-        envelope(
-            time,
-            0,
-            BOSS["slam"]["windup"],
-            BOSS["slam"]["windup"] + BOSS["slam"]["active"],
-        )
-        if state == "slam"
-        else 0
+    prepare = strike = 0.0
+    if state in ("cleave", "slam", "spin", "charge"):
+        profile = BOSS[state]
+        prepare = ease(time / profile["windup"])
+        strike = ease((time - profile["windup"]) / profile["active"])
+    recover = (
+        1 - ease(time / max(0.01, recovery_duration)) if state == "recover" else 0.0
     )
     result = []
     for mesh in meshes:
         rotations = []
         if hasattr(mesh, "arm"):
-            rotations = [
-                ((mesh.arm * 0.65, 2.1, 0), -0.8 * raise_arms, -mesh.arm * 0.55 * sweep)
-            ]
+            side = mesh.arm
+            pitch, turn = 0.0, 0.0
+            if recover:
+                pitch = {"cleave": 0.0, "slam": 0.7, "spin": -0.55, "charge": -0.5}[
+                    last_attack
+                ] * recover
+                turn = (
+                    side
+                    * {"cleave": -0.7, "slam": 0.0, "spin": 0.9, "charge": 0.45}[
+                        last_attack
+                    ]
+                    * recover
+                )
+            if state == "slam":
+                pitch = -1.8 * prepare + 2.5 * strike
+            elif state == "cleave":
+                turn = side * (0.65 * prepare - 1.35 * strike)
+            elif state == "spin":
+                pitch, turn = -0.55 * prepare, side * 0.9 * prepare
+            elif state == "charge":
+                pitch, turn = -0.5 * prepare, side * 0.45 * prepare
+            rotations.append(((side * 0.65, 2.1, 0), pitch, turn))
+        if hasattr(mesh, "leg"):
+            rotations.append(
+                (
+                    (mesh.leg * 0.4, 1.0, 0),
+                    math.sin(phase + (math.pi if mesh.leg < 0 else 0)) * moving * 0.20,
+                    0,
+                )
+            )
+        if state == "spin":
+            rotations.append(((0, 1.0, 0), -0.08 * prepare, math.tau * strike))
+        elif state == "charge":
+            rotations.append(((0, 0.7, 0), 0.28 * prepare, 0))
+        elif recover:
+            rotations.append(
+                (
+                    (0, 1.0 if last_attack == "spin" else 0.7, 0),
+                    {"cleave": 0.0, "slam": 0.0, "spin": -0.08, "charge": 0.28}[
+                        last_attack
+                    ]
+                    * recover,
+                    0,
+                )
+            )
         result.append(
             MeshPose(mesh, rotations, (0, math.sin(phase) * moving * 0.035, 0))
         )

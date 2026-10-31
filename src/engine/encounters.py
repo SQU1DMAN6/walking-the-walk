@@ -5,6 +5,7 @@ from engine import models
 from engine.combat import attack_hits, turn_towards
 from engine.entity import Entity
 from engine.markers import create_ring
+from engine.mesh import Mesh
 from engine.perception import Senses
 from engine.run_config import ARENA_RADIUS, BOSS
 from engine.streaming import chunk_key
@@ -35,6 +36,10 @@ class Demon(Senses, Entity):
         self.hit_resolved = False
         self.visible = False
         self.events = []
+        self.attack_pace = 1.0
+        self.guard_hits = 0
+        self.retaliation_pending = False
+        self.last_attack = "cleave"
 
     @property
     def visual_height(self):
@@ -42,8 +47,21 @@ class Demon(Senses, Entity):
 
     @property
     def render_meshes(self):
-        return models.pose_demon(
-            self.meshes, self.state, self.state_time, self.walk_phase, self.walk_blend
+        time = (
+            self.state_time / self.attack_pace
+            if self.state in ("cleave", "slam", "spin", "charge")
+            else self.state_time
+        )
+        return self.hit_pose(
+            models.pose_demon(
+                self.meshes,
+                self.state,
+                time,
+                self.walk_phase,
+                self.walk_blend,
+                getattr(self, "recovery_duration", 1.0),
+                self.last_attack,
+            )
         )
 
     def receive_hit(self, damage):
@@ -54,6 +72,9 @@ class Demon(Senses, Entity):
         )
         amount = min(self.health, amount)
         self.health -= amount
+        if self.state != "recover":
+            self.guard_hits += 1
+            self.retaliation_pending |= self.guard_hits >= 2
         if self.health <= 0:
             self.encounter = BossStage.DEFEATED
             self.visible = False
@@ -64,9 +85,13 @@ class Demon(Senses, Entity):
 
     def _begin(self, pattern, camera, world):
         self.transition(pattern)
+        self.last_attack = pattern
         self.hit_resolved = False
-        self.yaw = math.atan2(camera.x - self.x, camera.z - self.z)
-        self.attack_heading = self.yaw
+        self.attack_pace = 0.85 if self.phase == 2 else 1.0
+        self.attack_heading = math.atan2(camera.x - self.x, camera.z - self.z)
+        if pattern not in ("spin", "charge"):
+            self.yaw = self.attack_heading
+        self.telegraph = None
         if pattern == "slam":
             vx, vz = world.player_velocity
             dx, dz = vx * BOSS["slam"]["lead"], vz * BOSS["slam"]["lead"]
@@ -81,12 +106,79 @@ class Demon(Senses, Entity):
             )
             mesh.colour = (255, 83, 45)
             self.telegraph = location, [mesh]
+        elif pattern == "spin":
+            location = self.x, world.height(self.x, self.z), self.z
+            mesh = create_ring(
+                location, world.height, radius=BOSS["spin"]["radius"], thickness=0.24
+            )
+            mesh.colour = (255, 145, 48)
+            self.telegraph = location, [mesh]
+            self.guard_hits = 0
+            self.retaliation_pending = False
+        elif pattern == "charge":
+            location = self.x, world.height(self.x, self.z), self.z
+            forward = math.sin(self.attack_heading), math.cos(self.attack_heading)
+            right = forward[1], -forward[0]
+            points = [
+                (-2.0, 0),
+                (2.0, 0),
+                (2.0, 9),
+                (2.6, 9),
+                (0, 11),
+                (-2.6, 9),
+                (-2.0, 9),
+            ]
+            vertices = []
+            for side, reach in points:
+                x, z = (
+                    self.x + right[0] * side + forward[0] * reach,
+                    self.z + right[1] * side + forward[1] * reach,
+                )
+                vertices.append(
+                    (x - self.x, world.height(x, z) - location[1] + 0.065, z - self.z)
+                )
+            mesh = Mesh(
+                vertices,
+                [(0, i, i + 1) for i in range(1, len(vertices) - 1)],
+                (255, 83, 45),
+                (0, 0, 0),
+            )
+            self.telegraph = location, [mesh]
         self.events.append(pattern)
         world.next_attack = max(
-            world.next_attack, world.clock + BOSS[pattern]["windup"] + 0.2
+            world.next_attack,
+            world.clock + BOSS[pattern]["windup"] * self.attack_pace + 0.2,
         )
 
+    def _charge_step(self, dt, camera, world):
+        step = BOSS["charge"]["speed"] * dt / self.attack_pace
+        tx, tz = (
+            self.x + math.sin(self.attack_heading) * step,
+            self.z + math.cos(self.attack_heading) * step,
+        )
+        bodies = [camera, *world.actors]
+        blocked = any(
+            actor is not self
+            and getattr(actor, "state", "")
+            not in ("concealed", "ambush", "dormant", "emerging")
+            and math.hypot(tx - actor.x, tz - actor.z)
+            < min(self.distance_to(actor.x, actor.z), self.radius + actor.radius + 0.08)
+            for actor in bodies
+        )
+        if blocked or not world.line_clear(self.x, self.z, tx, tz, self.radius):
+            return
+        before = self.x, self.z
+        self.x, self.z = world.move(
+            self.x, self.z, tx - self.x, tz - self.z, self.radius
+        )
+        self.y = world.height(self.x, self.z)
+        moved = math.dist(before, (self.x, self.z))
+        self.walk_phase += moved * 8
+        if moved > 0:
+            self.walk_blend += 1 - math.exp(-dt * 14)
+
     def update(self, dt, camera, world):
+        self.advance_hit_reaction(dt)
         if self.encounter == BossStage.DEFEATED:
             return 0
         if hasattr(world, "chunks") and chunk_key(self.x, self.z) not in world.chunks:
@@ -143,9 +235,11 @@ class Demon(Senses, Entity):
             self.transition("return")
             self._move(dt, self.home, world, camera)
             return 0
-        if self.state in ("cleave", "slam"):
+        if self.state in ("cleave", "slam", "spin", "charge"):
             pattern = BOSS[self.state]
-            if self.state == "cleave" and self.state_time < pattern["windup"] * 0.5:
+            windup = pattern["windup"] * self.attack_pace
+            active = pattern["active"] * self.attack_pace
+            if self.state == "cleave" and self.state_time < windup * 0.5:
                 self.attack_heading = turn_towards(
                     self.attack_heading,
                     math.atan2(camera.x - self.x, camera.z - self.z),
@@ -162,11 +256,25 @@ class Demon(Senses, Entity):
                     self.speed * 0.45,
                     0,
                 )
-            if self.state_time + 1e-9 >= pattern["windup"] and not self.hit_resolved:
-                self.hit_resolved = True
-                if self.state == "cleave":
+            if self.state == "charge":
+                if self.state_time < windup:
+                    self.yaw = turn_towards(self.yaw, self.attack_heading, 6.0, dt)
+                travel = max(
+                    0.0,
+                    min(self.state_time, windup + active)
+                    - max(self.state_time - dt, windup),
+                )
+                if travel:
+                    self._charge_step(travel, camera, world)
+                    self.yaw = self.attack_heading
+            if self.state_time + 1e-9 >= windup and not self.hit_resolved:
+                if self.state in ("cleave", "charge"):
                     hit = attack_hits(
                         self, camera, world, pattern["range"], pattern["arc"], 3.0
+                    )
+                elif self.state == "spin":
+                    hit = attack_hits(
+                        self, camera, world, pattern["radius"], 180.0, 3.0
                     )
                 else:
                     hit = (
@@ -180,10 +288,12 @@ class Demon(Senses, Entity):
                         < 3
                         and world.line_clear(self.x, self.z, camera.x, camera.z, 0.1)
                     )
+                if self.state not in ("charge", "spin") or hit:
+                    self.hit_resolved = True
                 if hit:
                     return pattern["damage"]
-            if self.state_time >= pattern["windup"] + pattern["active"]:
-                self.recovery_duration = pattern["recovery"]
+            if self.state_time >= windup + active:
+                self.recovery_duration = pattern["recovery"] * self.attack_pace
                 self.transition("recover")
                 self.telegraph = None
             return 0
@@ -203,11 +313,27 @@ class Demon(Senses, Entity):
                 self.transition("pursue")
             return 0
         if (
-            distance < 7
+            distance < 11
             and world.clock >= world.next_attack
             and world.line_clear(self.x, self.z, camera.x, camera.z, 0.2)
         ):
-            pattern = "slam" if self.pattern_index % 2 or distance > 4 else "cleave"
+            rear = abs(
+                (math.atan2(camera.x - self.x, camera.z - self.z) - self.yaw + math.pi)
+                % math.tau
+                - math.pi
+            ) > math.radians(100)
+            if distance < BOSS["spin"]["radius"] and (
+                rear or self.retaliation_pending or self.pattern_index % 4 == 2
+            ):
+                pattern = "spin"
+            elif distance > 5.5 and (
+                self.pattern_index % 4 == 3
+                or self.phase == 2
+                and self.pattern_index % 3 == 1
+            ):
+                pattern = "charge"
+            else:
+                pattern = "slam" if self.pattern_index % 2 or distance > 4 else "cleave"
             self.pattern_index += 1
             self._begin(pattern, camera, world)
         else:

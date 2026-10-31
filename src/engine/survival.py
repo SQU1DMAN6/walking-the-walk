@@ -753,6 +753,7 @@ class SurvivalRun(Level1):
         self.camera.stamina = max(0, self.camera.stamina - profile["stamina"])
         self.attack_cooldown_timer = profile["cooldown"]
         self.attack_anim_timer = self.attack_anim_duration = profile["animation"]
+        self.attack_action = "attack"
         self.cancel_use()
         self.sound("fight", PERCEPTION["fight_noise"])
         return True
@@ -779,6 +780,10 @@ class SurvivalRun(Level1):
             )
             if target.kind != "boss":
                 target.health = max(0, target.health - actual)
+            if actual:
+                target.react_to_hit(
+                    (self.camera.x, self.camera.y, self.camera.z), heavy
+                )
             self.notify(
                 f"Hit: {actual} | {target.kind}: {target.health} health"
                 + (
@@ -863,6 +868,20 @@ class SurvivalRun(Level1):
         ):
             return False
         target.chops += 1
+        self.attack_action = "chop"
+        dx, dz = self.camera.x - target.x, self.camera.z - target.z
+        distance = max(0.01, math.hypot(dx, dz))
+        radius = target.site.obstacle.radius
+        self.effects.emit(
+            "wood_chips",
+            (
+                target.x + dx / distance * radius,
+                target.y + 0.65,
+                target.z + dz / distance * radius,
+            ),
+            yaw=math.atan2(dx, dz),
+            delay=0.15,
+        )
         if key:
             self.tree_chops[key] = target.chops
         self.sound("chop", PERCEPTION["chop_noise"])
@@ -971,6 +990,8 @@ class SurvivalRun(Level1):
                 "emerging": "The clearing went quiet. The Demon is rising.",
                 "cleave": "Demon: claw sweep! Break its reach.",
                 "slam": "Demon: red ground! Change direction and get out.",
+                "spin": "Demon: full sweep! Get outside the orange ring.",
+                "charge": "Demon: charge! Sidestep the red lane.",
                 "phase_two": "The Demon is furious. Watch its recovery.",
                 "defeated": "The demon has been defeated and the Beacon unlocked.",
             }[event]
@@ -1012,6 +1033,8 @@ class SurvivalRun(Level1):
                 "search",
                 "cleave",
                 "slam",
+                "spin",
+                "charge",
             )
             and e.distance_to(self.camera.x, self.camera.z)
             < PERCEPTION["encounter_leash"]

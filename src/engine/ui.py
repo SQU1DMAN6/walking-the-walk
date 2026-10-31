@@ -1566,6 +1566,8 @@ class TutorialHUD:
         gl.glPushMatrix()
         gl.glLoadIdentity()
         gl.glColor4f(1, 1, 1, 1)
+        gl.glEnable(gl.GL_ALPHA_TEST)
+        gl.glAlphaFunc(gl.GL_GREATER, 0.0)
         gl.glBegin(gl.GL_QUADS)
         for u, v, x, y in (
             (0, 1, 0, 0),
@@ -1576,6 +1578,7 @@ class TutorialHUD:
             gl.glTexCoord2f(u, v)
             gl.glVertex2f(x, y)
         gl.glEnd()
+        gl.glDisable(gl.GL_ALPHA_TEST)
         gl.glPopMatrix()
         gl.glMatrixMode(gl.GL_PROJECTION)
         gl.glPopMatrix()

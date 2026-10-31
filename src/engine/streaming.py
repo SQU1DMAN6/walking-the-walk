@@ -285,9 +285,7 @@ class ForestStreaming:
         removed = [site for site in chunk.trees if site.key in self.removed_trees]
         for site in removed:
             site.removed = True
-            chunk.obstacles.remove(site.obstacle)
-            ids = {id(m) for m in site.meshes}
-            chunk.meshes = [m for m in chunk.meshes if id(m) not in ids]
+            self._leave_stump(chunk, site)
         if removed:
             from engine.opengl_renderer import pack_meshes
 
@@ -449,15 +447,22 @@ class ForestStreaming:
         site.removed = True
         self.removed_trees.add(site.key)
         chunk = self.chunks[site.key[:2]]
-        chunk.obstacles.remove(site.obstacle)
-        ids = {id(m) for m in site.meshes}
-        chunk.meshes = [m for m in chunk.meshes if id(m) not in ids]
+        self._leave_stump(chunk, site)
         from engine.opengl_renderer import pack_meshes
 
         chunk.packed = pack_meshes(chunk.meshes)
         chunk.revision += 1
         self.render_revision += 1
         return True
+
+    @staticmethod
+    def _leave_stump(chunk, site):
+        chunk.obstacles.remove(site.obstacle)
+        ids = {id(m) for m in site.meshes}
+        chunk.meshes = [m for m in chunk.meshes if id(m) not in ids]
+        stump = getattr(site.meshes[0], "stump_mesh", None)
+        if stump is not None:
+            chunk.meshes.append(stump)
 
     def chase_target(self, x, z, px, pz):
         if self.line_clear(x, z, px, pz):

@@ -83,6 +83,41 @@ def forest_tree(position, seed, height=6.5, radius=0.35, density=0.5):
         ],
         bark,
     )
+    cut_height = 0.65
+    fraction = cut_height / centres[1][1]
+    cut = _mix(centres[0], centres[1], fraction)
+    cut_radius = radius * (1 - 0.13 * fraction)
+    stump = _tube([centres[0], cut], [radius, cut_radius], bark, 7)
+    stump[0][-7:] = [(x, cut_height, z) for x, _, z in stump[0][-7:]]
+    disk = [(cut[0], cut[1] + 0.004, cut[2])]
+    disk.extend(
+        (cut[0] + c * cut_radius, cut[1] + 0.004, cut[2] + s * cut_radius)
+        for c, s in RINGS[7]
+    )
+    trunk.stump_mesh = _merge(
+        [
+            stump,
+            (disk, [(0, (i + 1) % 7 + 1, i + 1) for i in range(7)], (194, 158, 101)),
+        ],
+        bark,
+    )
+    trunk.felled_mesh = _merge(
+        [
+            _tube(
+                [cut, *centres[1:]],
+                [cut_radius, *[radius * v for v in (0.87, 0.68, 0.46, 0.23, 0.04)]],
+                bark,
+                7,
+            )
+        ],
+        bark,
+    )
+    trunk.felled_mesh.vertices[:7] = [
+        (x, cut_height, z) for x, _, z in trunk.felled_mesh.vertices[:7]
+    ]
+    trunk.cut_height = cut_height
+    trunk.cut_pivot = tuple(a + b for a, b in zip(position, cut))
+    trunk.stump_mesh.position = trunk.felled_mesh.position = position
     wood, shoots = [], []
 
     def limb(points, radii, tier):
@@ -128,51 +163,39 @@ def forest_tree(position, seed, height=6.5, radius=0.35, density=0.5):
                 hub[2] + math.cos(fork_angle) * reach * 0.32,
             )
             limb(
-                [start, _mix(start, tip, 0.5), tip],
-                [width * 0.42, width * 0.23, width * 0.05],
+                [start, tip],
+                [width * 0.42, width * 0.05],
                 1,
             )
-            for j in range(4):
-                base = _mix(start, tip, 0.25 + j * 0.25)
+            for j in range(3):
+                base = _mix(start, tip, 0.3 + j * 0.35)
                 heading = fork_angle + (-1 if j % 2 else 1) * rng.uniform(0.55, 1.25)
                 shoot = (
                     base[0] + math.sin(heading) * rng.uniform(0.45, 0.7),
                     base[1] + rng.uniform(0.15, 0.45),
                     base[2] + math.cos(heading) * rng.uniform(0.45, 0.7),
                 )
-                limb([base, shoot], [width * 0.13, width * 0.015], 2)
                 shoots.append((base, shoot, heading))
     branches = BranchCloud(wood, position)
-    # One instance per leaf. The GPU handles the origami.
     leaf_rng = np.random.default_rng(seed & 0xFFFFFFFFFFFFFFFF)
-    count = len(shoots) * 10
-    starts = np.repeat(np.array([v[0] for v in shoots]), 10, axis=0)
-    ends = np.repeat(np.array([v[1] for v in shoots]), 10, axis=0)
-    headings = np.repeat(np.array([v[2] for v in shoots]), 10)
-    t = np.tile(np.repeat(np.linspace(0.15, 0.95, 5), 2), len(shoots))
-    bases = starts + (ends - starts) * t[:, None]
-    angles = headings + np.tile([-1, 1], count // 2) * leaf_rng.uniform(0.5, 1.5, count)
-    lengths = leaf_rng.uniform(0.5, 0.85, count)
-    axes = np.column_stack(
-        (
-            np.sin(angles) * lengths,
-            leaf_rng.uniform(-0.15, 0.5, count) * lengths,
-            np.cos(angles) * lengths,
-        )
-    )
-    widths = leaf_rng.uniform(0.16, 0.27, count)
+    count = len(shoots)
+    starts = np.array([v[0] for v in shoots])
+    ends = np.array([v[1] for v in shoots])
+    headings = np.array([v[2] for v in shoots])
+    axes = (ends - starts) * 1.65
+    widths = leaf_rng.uniform(0.65, 0.85, count)
     sides = np.column_stack(
         (
-            np.cos(angles) * widths,
-            leaf_rng.uniform(-0.2, 0.2, count) * widths,
-            -np.sin(angles) * widths,
+            np.cos(headings) * widths,
+            leaf_rng.uniform(-0.45, 0.45, count) * widths,
+            -np.sin(headings) * widths,
         )
     )
     colours = leaf_rng.uniform(
         (32, 105 + int(density * 8), 34), (62, 155 + int(density * 8), 67), (count, 3)
     )
-    instances = np.column_stack((bases, axes, sides, colours)).astype(np.float32)
-    instances = instances[leaf_rng.permutation(count)]
+    instances = np.column_stack((starts, axes, sides, colours)).astype(np.float32)
+    # Fixed leaf sprays, zero camera-facing shape-shifting. Stay in your lane, tree.
     foliage = [
         LeafCloud(instances[::2], position),
         LeafCloud(instances[1::2], position),

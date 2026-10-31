@@ -12,6 +12,7 @@ from engine.items import (
     DOG_SPEED,
     DOG_WINDUP,
 )
+from engine.mesh import MeshPose
 from engine.run_config import SPIDER
 
 
@@ -26,6 +27,41 @@ class Entity:
     visible: bool = True
     interactable: bool = False
     id: int = 0
+    hit_reaction: float = 0.0
+    hit_direction: float = 0.0
+    hit_duration: float = 0.24
+
+    def react_to_hit(self, source, heavy=False):
+        self.hit_direction = math.atan2(self.x - source[0], self.z - source[2])
+        self.hit_duration = 0.3 if heavy else 0.24
+        self.hit_reaction = self.hit_duration
+
+    def advance_hit_reaction(self, dt):
+        self.hit_reaction = max(0.0, self.hit_reaction - max(0.0, dt))
+
+    def hit_pose(self, meshes):
+        if self.hit_reaction <= 0:
+            return meshes
+        from engine.animation import envelope
+
+        amount = envelope(
+            self.hit_duration - self.hit_reaction, 0, 0.06, self.hit_duration
+        )
+        turn = self.hit_direction - self.yaw
+        tilt = amount * (0.065 if self.kind == "boss" else 0.16)
+        pivot = (0, 0.5, 0)
+        recoil = ((pivot, 0, -turn), (pivot, tilt, turn))
+        offset = (math.sin(turn) * amount * 0.08, 0, math.cos(turn) * amount * 0.08)
+        return [
+            MeshPose(
+                getattr(m, "source", m),
+                (*getattr(m, "rotations", ()), *recoil),
+                tuple(
+                    a + b for a, b in zip(getattr(m, "translation", (0, 0, 0)), offset)
+                ),
+            )
+            for m in meshes
+        ]
 
     @property
     def position(self):
@@ -100,12 +136,14 @@ class Dog(Entity):
 
     @property
     def render_meshes(self):
-        return models.pose_dog(
-            self.meshes, self.attack_elapsed, self.walk_phase, self.walk_blend
+        return self.hit_pose(
+            models.pose_dog(
+                self.meshes, self.attack_elapsed, self.walk_phase, self.walk_blend
+            )
         )
 
     def update(self, dt, camera, world):
-
+        self.advance_hit_reaction(dt)
         if self.health <= 0:
             self.state = "defeated"
             return 0
@@ -173,6 +211,8 @@ class Spider(Dog):
 
     @property
     def render_meshes(self):
-        return models.pose_spider(
-            self.meshes, self.walk_phase, self.walk_blend, self.attack_elapsed
+        return self.hit_pose(
+            models.pose_spider(
+                self.meshes, self.walk_phase, self.walk_blend, self.attack_elapsed
+            )
         )

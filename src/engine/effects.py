@@ -8,6 +8,7 @@ from engine.mesh import Mesh, MeshPose, create_prism
 from engine.models import lathe
 
 LIFETIMES = {
+    "wood_chips": 0.55,
     "pickup": 0.65,
     "crafted": 0.8,
     "consumed": 0.8,
@@ -20,6 +21,7 @@ LIFETIMES = {
     "tree_hit": 0.7,
 }
 COLOURS = {
+    "wood_chips": (196, 152, 89),
     "pickup": (241, 218, 112),
     "crafted": (155, 234, 176),
     "food": (143, 224, 135),
@@ -49,7 +51,7 @@ class Effect:
 
     @property
     def progress(self):
-        return min(1.0, self.age / self.lifetime)
+        return max(0.0, min(1.0, self.age / self.lifetime))
 
     @property
     def opacity(self):
@@ -59,6 +61,11 @@ class Effect:
 @lru_cache(maxsize=16)
 def mote(colour):
     return create_prism(0.09, 0.09, 0.09, colour, (0, 0, 0))
+
+
+@lru_cache(maxsize=1)
+def wood_chip():
+    return create_prism(0.016, 0.045, 0.018, COLOURS["wood_chips"], (0, 0, 0))
 
 
 @lru_cache(maxsize=3)
@@ -96,6 +103,7 @@ class Effects:
         attachment=None,
         velocity=(0.0, 0.0, 0.0),
         acceleration=(0.0, 0.0, 0.0),
+        delay=0.0,
     ):
         effect = Effect(
             kind,
@@ -107,6 +115,7 @@ class Effects:
             attachment=attachment,
             velocity=velocity,
             acceleration=acceleration,
+            age=-max(0.0, delay),
         )
         self.live.append(effect)
         self.emitted[kind] += 1
@@ -149,12 +158,27 @@ class Effects:
             gl.glDepthMask(gl.GL_TRUE)
 
     def instances(self, effect):
+        if effect.age < 0:
+            return []
         t, age = effect.progress, effect.age
         x, y, z = (
             p + v * age + 0.5 * a * age * age
             for p, v, a in zip(effect.position, effect.velocity, effect.acceleration)
         )
         kind = effect.kind
+        if kind == "wood_chips":
+            return [
+                (
+                    MeshPose(wood_chip(), (((0, 0, 0), age * 8, i),)),
+                    x
+                    + math.sin(effect.yaw + (i - 3) * 0.28) * age * (0.5 + i % 3 * 0.2),
+                    y + age * (3.5 + i % 3 * 0.65) - 3 * age * age,
+                    z
+                    + math.cos(effect.yaw + (i - 3) * 0.28) * age * (0.5 + i % 3 * 0.2),
+                    0,
+                )
+                for i in range(7)
+            ]
         if kind in ("player_died", "crafted", "consumed"):
             return []
         colour = COLOURS[kind]

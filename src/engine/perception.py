@@ -144,6 +144,7 @@ class Senses:
             self.transition("reposition")
 
     def update(self, dt, camera, world):
+        self.advance_hit_reaction(dt)
         if self.health <= 0:
             self.transition("defeated")
             return 0
@@ -382,8 +383,10 @@ class AmbushSpider(Senses, Spider):
     def render_meshes(self):
         from engine import models
 
-        return models.pose_spider(
-            self.meshes, self.walk_phase, self.walk_blend, self.attack_elapsed
+        return self.hit_pose(
+            models.pose_spider(
+                self.meshes, self.walk_phase, self.walk_blend, self.attack_elapsed
+            )
         )
 
 
@@ -412,4 +415,6 @@ class Viper(Senses, Dog):
     def render_meshes(self):
         from engine import models
 
-        return models.pose_viper(self.meshes, self.walk_phase, self.attack_elapsed)
+        return self.hit_pose(
+            models.pose_viper(self.meshes, self.walk_phase, self.attack_elapsed)
+        )

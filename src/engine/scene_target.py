@@ -14,12 +14,11 @@ class SceneTarget:
 
     def begin(self, width, height):
         r = self.renderer
-        scale = min(1.0, 384 / width, 216 / height) if self.software else 1.0
+        scale = min(1.0, 288 / width, 162 / height) if self.software else 1.0
         size = max(1, round(width * scale)), max(1, round(height * scale))
         self.saved = r.width, r.height, r.focal_length
         r.width, r.height = size
         r.focal_length *= scale
-        r.resolution_scale = scale
         if self.size != size:
             self.close()
             self.size = size

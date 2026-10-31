@@ -4,6 +4,8 @@ from engine.mesh import Mesh
 
 
 class LeafCloud(Mesh):
+    leaves_per_instance = 14
+
     def __init__(self, instances, position):
         self.leaf_instances = np.ascontiguousarray(instances, dtype=np.float32)
         self.position = position
@@ -16,18 +18,19 @@ class LeafCloud(Mesh):
     def instance_count(self):
         return len(self.leaf_instances)
 
+    @property
+    def leaf_count(self):
+        return self.instance_count * self.leaves_per_instance
+
     def _expand(self):
         if self._geometry is None:
             data = self.leaf_instances
             base, axis, side = data[:, :3], data[:, 3:6], data[:, 6:9]
             points = (
                 base[:, None, :]
-                + axis[:, None, :] * np.array([0, 0.48, 1, 0.48])[None, :, None]
+                + axis[:, None, :] * np.array([0, 0, 1, 1])[None, :, None]
             )
-            points[:, 1] += side
-            points[:, 3] -= side
-            points[:, 2, 1] -= 0.06
-            points[:, 3, 1] -= np.linalg.norm(side, axis=1) * 0.3
+            points += side[:, None, :] * np.array([-1, 1, 1, -1])[None, :, None]
             offsets = np.arange(len(data), dtype=np.int32)[:, None, None] * 4
             faces = (offsets + np.array([[0, 1, 2], [0, 2, 3]]))[..., :].reshape(-1, 3)
             self._geometry = (

@@ -47,7 +47,10 @@ class Stage(IntEnum):
 
 
 INSTRUCTIONS = {
-    Stage.MOVEMENT: ("LET'S ROLL", "Press [W, A, S, D] to move along the path. Use [Shift] to sprint."),
+    Stage.MOVEMENT: (
+        "LET'S ROLL",
+        "Press [W, A, S, D] to move along the path. Use [Shift] to sprint.",
+    ),
     Stage.LOOK: ("LOOK AROUND", "Move the mouse to look around."),
     Stage.SUPPLIES: (
         "FIND SUPPLIES",
@@ -141,6 +144,7 @@ class Level1:
         self.damage_feedback = DamageFeedback()
         self.effects = Effects()
         self.tree_falls = TreeFalls()
+        self.attack_action = "attack"
         self._death_confirmed = False
         self._prompt_id = None
         self._sprint_blocked = False
@@ -725,6 +729,7 @@ class Level1:
             target.health = max(
                 0, target.health - (HEAVY_ATTACK["damage"] if heavy else SPEAR_DAMAGE)
             )
+            target.react_to_hit((self.camera.x, self.camera.y, self.camera.z), heavy)
             self.notify(f"Hit landed. Dog health: {target.health}")
             if target.health == 0:
                 self.entities.remove(target.id)

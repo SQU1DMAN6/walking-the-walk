@@ -73,7 +73,7 @@ VENOM = {
 }
 BOSS = {
     "health": 240,
-    "detection": 50.0,
+    "detection": 100.0,
     "speed": 3.2,
     "phase_speed": 3.8,
     "radius": 0.85,
@@ -86,17 +86,33 @@ BOSS = {
         "windup": 0.8,
         "active": 0.16,
         "recovery": 1.25,
-        "range": 3.6,
+        "range": 2.5,
         "damage": 20,
         "arc": 75.0,
     },
     "slam": {
-        "windup": 1.15,
+        "windup": 1.5,
         "active": 0.2,
         "recovery": 1.6,
-        "radius": 3.4,
+        "radius": 4.4,
         "damage": 25,
         "lead": 0.4,
+    },
+    "spin": {
+        "windup": 1.1,
+        "active": 0.3,
+        "recovery": 0.85,
+        "radius": 1,
+        "damage": 34,
+    },
+    "charge": {
+        "windup": 0.85,
+        "active": 0.8,
+        "recovery": 1.35,
+        "range": 5.7,
+        "arc": 5.0,
+        "speed": 13.0,
+        "damage": 40,
     },
 }
 

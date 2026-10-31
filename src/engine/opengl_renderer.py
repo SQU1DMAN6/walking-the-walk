@@ -170,7 +170,7 @@ def _mesh_array(mesh):
     return data.reshape(-1, 11)
 
 
-def pack_meshes(meshes, lods=True):
+def pack_meshes(meshes, spatial=True):
     groups = {}
     for mesh in meshes:
         tile = (math.floor(mesh.position[0] / 8), math.floor(mesh.position[2] / 8))
@@ -184,7 +184,7 @@ def pack_meshes(meshes, lods=True):
         elif mesh.faces:
             key = (
                 ("mesh", mesh.texcoords is not None, *tile)
-                if lods
+                if spatial
                 else mesh.texcoords is not None
             )
             groups.setdefault(key, []).append(_mesh_array(mesh))
@@ -199,6 +199,8 @@ def release_batches(batches):
         if batch.kind in ("foliage", "limbs"):
             vaos.add(batch.common_vao)
         vbos.add(batch.vbo)
+        if hasattr(batch, "element_vbo"):
+            vbos.add(batch.element_vbo)
     if vaos:
         gl.glDeleteVertexArrays(len(vaos), list(vaos))
     if vbos:
@@ -283,18 +285,48 @@ def build_batches(meshes):
 
 class OpenGLRenderer:
     def visible(self, camera, x, y, z, radius):
-        dx, dy, dz = x - camera.x, y - camera.y, z - camera.z
-        cy, sy = math.cos(camera.yaw), math.sin(camera.yaw)
+        key = (
+            camera.x,
+            camera.y,
+            camera.z,
+            camera.yaw,
+            camera.pitch,
+            camera.pivot_offset,
+            camera.bob_offset,
+            self.width,
+            self.height,
+            self.focal_length,
+        )
+        if key != getattr(self, "_clip_key", None):
+            cy, sy = math.cos(camera.yaw), math.sin(camera.yaw)
+            cp, sp = math.cos(camera.pitch), math.sin(camera.pitch)
+            horizontal, vertical = (
+                self.width / (2 * self.focal_length),
+                self.height / (2 * self.focal_length),
+            )
+            self._clip_key = key
+            self._clip_basis = (
+                *camera.eye_position(),
+                cy,
+                sy,
+                cp,
+                sp,
+                horizontal,
+                vertical,
+                math.hypot(1, horizontal),
+                math.hypot(1, vertical),
+            )
+        ex, ey, ez, cy, sy, cp, sp, horizontal, vertical_limit, h_radius, v_radius = (
+            self._clip_basis
+        )
+        dx, dy, dz = x - ex, y - ey, z - ez
         rx, forward = dx * cy - dz * sy, dx * sy + dz * cy
-        cp, sp = math.cos(camera.pitch), math.sin(camera.pitch)
         vertical, depth = dy * cp + forward * sp, -dy * sp + forward * cp
         return (
             depth + radius > self.near
             and depth - radius < self.fog_far + 8
-            and abs(rx)
-            < max(0, depth) * self.width / (2 * self.focal_length) + radius * 1.5
-            and abs(vertical)
-            < max(0, depth) * self.height / (2 * self.focal_length) + radius * 1.5
+            and abs(rx) < depth * horizontal + radius * h_radius
+            and abs(vertical) < depth * vertical_limit + radius * v_radius
         )
 
     def __init__(self, width, height):
@@ -342,11 +374,6 @@ class OpenGLRenderer:
             float ry = rel.y * u_cos_pitch - rz * u_sin_pitch;
             float rz2 = rel.y * u_sin_pitch + rz * u_cos_pitch;
 
-            float nrx = in_normal.x * u_cos_yaw - in_normal.z * u_sin_yaw;
-            float nrz = in_normal.x * u_sin_yaw + in_normal.z * u_cos_yaw;
-            float nry = in_normal.y * u_cos_pitch - nrz * u_sin_pitch;
-            float nrz2 = in_normal.y * u_sin_pitch + nrz * u_cos_pitch;
-
             float ndc_x = rx * u_focal / (u_w * 0.5);
             float ndc_y = ry * u_focal / (u_h * 0.5);
 
@@ -355,7 +382,7 @@ class OpenGLRenderer:
                          - 2.0 * u_far * u_near / (u_far - u_near);
             // Keep real depth so stuff behind you gets clipped.
             gl_Position = vec4(ndc_x, ndc_y, clip_z, rz2);
-            v_normal = normalize(vec3(nrx, nry, nrz2));
+            v_normal = in_normal;
             v_texcoord = in_texcoord;
             v_color = in_color;
             v_viewz = rz2;
@@ -459,7 +486,6 @@ class OpenGLRenderer:
         # Vertex layout: position(3), normal(3), uv(2), colour(3).
         self._stride = 11 * 4
         self.foliage = FoliageRenderer(self)
-        self.resolution_scale = 1.0
         self.scene_target = SceneTarget(self)
 
     def _set_camera_uniforms(self, camera):
@@ -475,12 +501,7 @@ class OpenGLRenderer:
         gl.glUniform1f(self.cos_pitch_loc, cp)
         gl.glUniform1f(self.sin_pitch_loc, sp)
 
-        lx, ly, lz = self.sun_world
-        rx = lx * cy + lz * sy
-        rz = -lx * sy + lz * cy
-        ry = ly * cp - rz * sp
-        rz2 = ly * sp + rz * cp
-        gl.glUniform3f(self.light_dir_loc, rx, ry, rz2)
+        gl.glUniform3f(self.light_dir_loc, *self.sun_world)
 
         gl.glUniform1f(self.focal_loc, self.focal_length)
         gl.glUniform1f(self.w_loc, float(self.width))
@@ -666,7 +687,7 @@ class OpenGLRenderer:
             source = getattr(mesh, "source", mesh)
             cached = getattr(source, "_packed_dynamic", None)
             if cached is None:
-                cached = pack_meshes([source], lods=False)[0][1]
+                cached = pack_meshes([source], spatial=False)[0][1]
                 source._packed_dynamic = cached
             data = cached.copy()
             if source is not mesh:

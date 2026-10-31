@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass, field
+from functools import cached_property
 
 from engine.animation import ease, rotate_point
 from engine.mesh import MeshPose
@@ -37,7 +38,12 @@ class FallingTree:
     def angle(self):
         return ease(self.age / FALL_SECONDS) * math.pi / 2
 
-    @property
+    @cached_property
+    def pivot(self):
+        x, y, z = self.site.position
+        return getattr(self.site.meshes[0], "cut_pivot", (x, y, z))
+
+    @cached_property
     def trunk_height(self):
         trunk = self.site.meshes[0]
         return max(
@@ -46,14 +52,22 @@ class FallingTree:
 
     def endpoint(self, angle=None):
         offset = rotate_point(
-            (0, self.trunk_height, 0),
+            (0, self.trunk_height - (self.pivot[1] - self.site.position[1]), 0),
             (0, 0, 0),
             (self.angle if angle is None else angle),
             self.direction,
         )
-        return tuple(p + v for p, v in zip(self.site.position, offset))
+        return tuple(p + v for p, v in zip(self.origin(angle), offset))
 
-    @property
+    def origin(self, angle=None):
+        x, y, z = self.pivot
+        cut = y - self.site.position[1]
+        drop = max(0.0, cut - self.trunk_radius) * ease(
+            ((self.angle if angle is None else angle) - 0.9) / (math.pi / 2 - 0.9)
+        )
+        return x, y - drop, z
+
+    @cached_property
     def trunk_radius(self):
         trunk = self.site.meshes[0]
         base = min(v[1] for v in trunk.vertices)
@@ -77,7 +91,7 @@ class FallingTree:
         end = self.endpoint(angle)
         start = tuple(
             a + (b - a) * min(0.65 / self.trunk_height, 0.2)
-            for a, b in zip(self.site.position, end)
+            for a, b in zip(self.origin(angle), end)
         )
         return any(
             segment_distance_3d((feet[0], feet[1] + h, feet[2]), start, end)
@@ -93,7 +107,7 @@ class FallingTree:
         length = self.trunk_height
         for i in range(2, math.ceil(length / 0.25) + 1):
             t = min(1.0, i * 0.25 / length)
-            x, y, z = (a + (b - a) * t for a, b in zip(self.site.position, end))
+            x, y, z = (a + (b - a) * t for a, b in zip(self.origin(angle), end))
             radius = self.trunk_radius * (1 - 0.6 * t)
             if y < world.height(x, z) + 0.02:
                 return True
@@ -101,6 +115,8 @@ class FallingTree:
                 height = (
                     8.0
                     if obstacle.kind == "tree"
+                    else 0.65
+                    if obstacle.kind == "stump"
                     else 3.2
                     if obstacle.kind == "ridge"
                     else obstacle.radius * 1.2
@@ -115,12 +131,16 @@ class FallingTree:
 
     def meshes(self):
         # Yaw into fall space, tip, then yaw back: the base stays put.
-        pivot = self.site.position
+        pivot = self.pivot
+        trunk = self.site.meshes[0]
+        meshes = [getattr(trunk, "felled_mesh", trunk), *self.site.meshes[1:]]
         return [
             MeshPose(
-                mesh, ((pivot, 0, -self.direction), (pivot, self.angle, self.direction))
+                mesh,
+                ((pivot, 0, -self.direction), (pivot, self.angle, self.direction)),
+                (0, self.origin()[1] - pivot[1], 0),
             )
-            for mesh in self.site.meshes
+            for mesh in meshes
         ]
 
 
@@ -185,6 +205,11 @@ class TreeFalls:
                 o
                 for o in world.obstacles
                 if o != tree.site.obstacle
+                and not (
+                    o.kind == "stump"
+                    and o.x == tree.site.obstacle.x
+                    and o.z == tree.site.obstacle.z
+                )
                 and math.hypot(o.x - tree.site.position[0], o.z - tree.site.position[2])
                 < tree.trunk_height + o.radius
             )

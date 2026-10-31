@@ -63,8 +63,12 @@ def render_scene(renderer, level, batches):
         if not entity.visible or (entity.kind == "tree" and not entity.meshes):
             continue
         distance = entity.distance_to(camera.x, camera.z)
+        center_y, radius = (
+            (entity.y + 1.9, 4.0) if entity.kind == "boss" else (entity.y, 2.0)
+        )
         if not hasattr(level.world, "chunks") or (
-            distance < 58 and renderer.visible(camera, entity.x, entity.y, entity.z, 2)
+            distance < 58
+            and renderer.visible(camera, entity.x, center_y, entity.z, radius)
         ):
             for mesh in entity.render_meshes:
                 mx, my, mz = mesh.position
@@ -120,7 +124,12 @@ def render_scene(renderer, level, batches):
                 level.attack_anim_timer * SPEAR_ANIMATION / level.attack_anim_duration,
             )
         elif held == "axe":
-            meshes = models.pose_axe(
+            pose = (
+                models.pose_chop
+                if getattr(level, "attack_action", "") == "chop"
+                else models.pose_axe
+            )
+            meshes = pose(
                 level.axe_meshes,
                 level.attack_anim_timer * 0.45 / level.attack_anim_duration,
             )
@@ -147,6 +156,7 @@ class Application:
         self.level = self.renderer = None
         self.batches = []
         self.chunk_batches = {}
+        self.chunk_bounds = {}
         self.upload_times = []
         self.executor = self.loading_future = None
         self.loading_visible = False
@@ -184,6 +194,7 @@ class Application:
             if batches:
                 release_batches(batches)
         self.chunk_batches.clear()
+        self.chunk_bounds.clear()
         if self.batches:
             release_batches(self.batches)
         if self.renderer:
@@ -577,10 +588,8 @@ class Application:
                 self.sync_chunks(self.level)
                 visible = []
                 for key, (_, batches) in self.chunk_batches.items():
-                    x, z = (key[0] + 0.5) * 32, (key[1] + 0.5) * 32
-                    if self.renderer.visible(
-                        self.level.camera, x, self.level.world.height(x, z) + 3, z, 25
-                    ):
+                    center, radius = self.chunk_bounds[key]
+                    if self.renderer.visible(self.level.camera, *center, radius):
                         visible.extend(batches)
                 self.render_revision = revision
                 render_scene(self.renderer, self.level, visible)
@@ -605,6 +614,7 @@ class Application:
         chunks = level.world.chunks
         for key in self.chunk_batches.keys() - chunks.keys():
             _, old = self.chunk_batches.pop(key)
+            self.chunk_bounds.pop(key, None)
             release_batches(old)
         pending = [
             chunk
@@ -623,6 +633,12 @@ class Application:
             batches = upload_batches(chunk.packed)
             old = self.chunk_batches.get(chunk.key)
             self.chunk_batches[chunk.key] = chunk.revision, batches
+            low = [min(b.center[i] - b.radius for b in batches) for i in range(3)]
+            high = [max(b.center[i] + b.radius for b in batches) for i in range(3)]
+            self.chunk_bounds[chunk.key] = (
+                tuple((a + b) / 2 for a, b in zip(low, high)),
+                math.dist(low, high) / 2,
+            )
             if old:
                 release_batches(old[1])
             self.upload_times.append((time.perf_counter() - started) * 1000)

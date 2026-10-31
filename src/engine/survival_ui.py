@@ -321,6 +321,8 @@ class SurvivalHUD(TutorialHUD):
             if nearest.kind == "boss":
                 label = {
                     "slam": "Red ring: get out",
+                    "spin": "Orange ring: back off",
+                    "charge": "Red lane: sidestep",
                     "cleave": "Claw: break reach",
                     "recover": "Recovery: strike!",
                 }.get(nearest.state, "Watch its windup")

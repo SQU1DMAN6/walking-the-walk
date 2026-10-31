@@ -2,14 +2,13 @@
 
 ### Written by Quan Thai
 
-### Current implementation: Version 1.7 — Dense Canopies and Background Loading
+### Current implementation: Version 1.7 — Stable Trees and Responsive Combat
 
 A first-person exploration and PvE survival game set in **CS Jungle**. Navigate winding rainforest paths, scavenge materials, craft equipment, survive dogs, giant spiders and venom runners, defeat the Demon Thing, and activate the northern end beacon. Skull signs warn of dangerous shortcuts; longer detours offer fewer encounters. An axe can open alternative routes through trees.
 
 **Play** opens configuration: Easy, Medium or Hard, and Short, Normal or Long. Choose with the mouse or Up/Down and Left/Right, then select Start run. Each normal run gets a fresh, logged random seed. Routes, ridges, valleys, broadleaf trees, rocky patches and undergrowth continue into streamed chunks as you explore. Chopped trees, collected supplies, dropped stacks and enemy state survive chunk reloads during the run. Every run starts with full health/stamina and an empty inventory. The **Tutorial** remains a separate guided level; About retains the project's authored information.
 
 Short, Normal and Long have primary routes of **400, 800 and 1,500 metres**, independent of difficulty. Distance is the horizontal centre-line length from spawn to beacon, including the boss approach; it is not straight-line displacement. Surface distance is logged separately. Signed shortcuts cut travel but bring more encounters; detours, resource branches and occasional cross-links offer other choices. Physical rocky ridges separate many alternatives. Difficulty changes supplies, population, detection escalation, pursuit memory and coordination.
-
 
 ## Run
 
@@ -26,61 +25,60 @@ The game starts fullscreen. Use `--windowed --width 1280 --height 800` for a win
 
 Once the first title frame is visible, a separate worker process prepares the main world for the selected configuration, then the tutorial. Selecting Tutorial interrupts unfinished main-world generation; its replacement is cached afterwards. Configuration changes discard stale preparations. Prepared worlds live in a private temporary cache until selected, and the tutorial resets when replayed. The cache and worker are cleaned up on exit. OpenGL uploads stay on the window thread.
 
-| Main-game control | Action |
-| --- | --- |
-| WASD / mouse | Walk / look |
-| Shift | Sprint |
-| F | Collect, read a sign, chop with a held axe, or activate the beacon |
-| 1–9 / 0 | Select inventory slot / empty hand |
-| Hold E | Use selected food, water or bandage; release between uses |
-| C | Open/close crafting |
-| Up/Down, Enter | Choose recipe, craft; clicking also works |
-| Left click | Normal spear/axe attack, no stamina cost (including a miss) |
-| Right click | Power attack: 60 base damage, 30 stamina, 1.2-second shared cooldown |
-| G | Drop the selected stack; recover it with F |
-| H | Pause with controls and Resume/Menu/Exit options |
-| Esc | Close a panel, pause, or return to title while paused |
-| Enter while paused | Resume |
-| R after death/completion | Configure another run |
-| Ctrl+Q | Exit |
+| Main-game control        | Action                                                               |
+| ------------------------ | -------------------------------------------------------------------- |
+| WASD / mouse             | Walk / look                                                          |
+| Shift                    | Sprint                                                               |
+| F                        | Collect, read a sign, chop with a held axe, or activate the beacon   |
+| 1–9 / 0                  | Select inventory slot / empty hand                                   |
+| Hold E                   | Use selected food, water or bandage; release between uses            |
+| C                        | Open/close crafting                                                  |
+| Up/Down, Enter           | Choose recipe, craft; clicking also works                            |
+| Left click               | Normal spear/axe attack, no stamina cost (including a miss)          |
+| Right click              | Power attack: 60 base damage, 30 stamina, 1.2-second shared cooldown |
+| G                        | Drop the selected stack; recover it with F                           |
+| H                        | Pause with controls and Resume/Menu/Exit options                     |
+| Esc                      | Close a panel, pause, or return to title while paused                |
+| Enter while paused       | Resume                                                               |
+| R after death/completion | Configure another run                                                |
+| Ctrl+Q                   | Exit                                                                 |
 
 Bitmap text uses the original fixed-width PSF artwork and smooth scaling, with a uniformly scaled original 16×32 glyphs (small text uses 90% scale, about 18 visible capital-letter pixels), larger headings and responsive layouts. Red arcs around the crosshair show the direction of recent hits and rotate as the camera turns; poison is labelled without inventing an attacker direction.
 
 Nine inventory slots show quantities, item names and the selected item's name/action. Cans and bottles enter the pack as consumables. **Scrap appears only after consumption**, once per container. Food and water heal ten. Water also restores the configured stamina amount (currently 75) and cures poison. They may be consumed at full health to obtain crafting scrap; the HUD reports the actual healing. Bandages roll 20–35 once per completed use and cannot be wasted at full health. Healing takes one second and continues while taking nonfatal damage; E must be released between uses. Death, changing slots, opening a menu or releasing E still cancels an unfinished use. Dropping and recovering a container does not award scrap.
 
-| Recipe | Ingredients |
-| --- | --- |
-| Compass | 1 metal scrap + 1 plastic scrap |
-| Stone spear | 2 sticks + 1 stone |
-| Stone axe | 4 sticks + 5 stone |
-| Bandage | 2 leaves |
+| Recipe      | Ingredients                     |
+| ----------- | ------------------------------- |
+| Compass     | 1 metal scrap + 1 plastic scrap |
+| Stone spear | 2 sticks + 1 stone              |
+| Stone axe   | 4 sticks + 5 stone              |
+| Bandage     | 2 leaves                        |
 
-Stone uses the existing `rock` inventory item. Decorative pebbles are smaller and cannot be collected. Four in-range axe chops start a base-pivoted fall lasting up to 1.8 seconds. The moving trunk can hit you for exactly **99 health**, once per tree. In the main game it also deals 100 damage to mobs it actually strikes, once per tree/mob; ordinary enemies can be killed, while the Demon retains its activation gate and armour. Step away: leaves appear when it lands. The felled tree stays removed across chunk reloads. Nearby terrain and solid obstacles can stop the fall early. Chopping costs no stamina. The guaranteed route is traversable without an axe. Recipes, weapon parameters and difficulty settings are defined in `run_recipes.py`, `run_config.py` and `items.py`.
+Stone uses the existing `rock` inventory item. Decorative pebbles are smaller and cannot be collected. Four in-range axe chops use a sideways animation and release seven delayed wood splinters per strike. Felling pivots at a 0.65 m cut, leaves a flat-topped stump, and lowers the detached trunk as it lands, lasting up to 1.8 seconds. Stumps persist across chunk reloads and are passable so the cleared route stays open. The moving trunk can hit you for exactly **99 health**, once per tree. In the main game it also deals 100 damage to mobs it actually strikes, once per tree/mob; ordinary enemies can be killed, while the Demon retains its activation gate and armour. Step away: leaves appear when it lands. The felled tree stays removed across chunk reloads. Nearby terrain and solid obstacles can stop the fall early. Chopping costs no stamina. The guaranteed route is traversable without an axe. Recipes, weapon parameters and difficulty settings are defined in `run_recipes.py`, `run_config.py` and `items.py`.
 
 Dogs are faster than walking and slower than sprinting. They patrol, check vision and investigate walking, sprinting, fighting and chopping noises. They pursue the last known location after losing sight, then search a widening area before disengaging. Spiders can drop from trees with a visible warning, pursue, intercept and approach from different angles. Enemies advance during ordinary windups and recovery; hits check current reach, direction, height and cover once per attack. Bodies block movement. Easy/Medium allow one nearby attack windup at a time; Hard allows two, spaced apart. Back away, use cover and pick your fights. Survival stamina recovers while walking and more quickly while resting.
 
 Venom runners appear on dangerous routes within 100 m of the beacon on Short and 500 m on Normal/Long, measured as remaining straight-line ground distance. Their opportunities are finite, spaced and subject to a cooldown and active-population limit. A valid bite poisons: two health every two seconds until water is consumed. Repeated bites retain one ticking effect. The purple HUD status stays visible; drinking can finish through both bites and poison ticks. Guaranteed water caches precede the final clearing.
 
-The horned Demon Thing emerges before the beacon. Dodge its locked red slam circle, break the reach of its claw sweep, then attack during recovery for full damage. Attacks outside recovery meet its guard. At half health it becomes brighter and faster. Leaving the clearing preserves its health, and returning resumes the encounter. The beacon remains sealed until the Demon Thing is defeated.
+The horned Demon Thing emerges before the beacon. Break the reach of its claw sweep, dodge the locked red slam circle, retreat outside its orange 4.4 m sweep ring, and sidestep the locked red charge lane. Close rear attacks and repeated guarded hits provoke the 34-damage sweep. Attack during recovery for full damage; phase two shortens windups and recoveries and accelerates charges. Its attack poses ease back into guard during recovery. Dogs, spiders, vipers and the Demon show brief directional hit recoil from both weapons, including power attacks. Recoil does not interrupt committed attacks. Attacks outside recovery meet its guard. At half health it becomes brighter and faster. Leaving the clearing preserves its health, and returning resumes the encounter. The beacon remains sealed until the Demon Thing is defeated.
 
 Hold the compass's numbered slot to see its dial and red needle pointing towards the fixed beacon, including across unloaded chunks. It provides a bearing; route choices remain yours. Play has an objective line and contextual prompts, with no tutorial arrows or lessons. Pause/crafting stops encounters and the run timer. F starts a 0.8-second beacon link; leaving interaction range or taking damage interrupts it. Death and completion show distinct results, elapsed time, configuration and new-run/menu/exit options. Returning to the title discards the run.
 
-The tutorial keeps the original v1.6 teaching sequence and extends its route for compass practice while using the **same chunk, terrain and tree generator as Play**. Both forests use one seeded tree builder: curved tapered trunks grow asymmetric boughs, three forks per bough and smaller shoots, with 720–960 individual folded leaves attached along them. Extra inner forks fill the crown. Branches and leaves use compact instance records; their triangles are constructed on the GPU. Distant trees use fewer branch tiers and textured sprays of small leaves, with spatial culling and shared chunk buffers. OpenGL 4.3 uses indirect multi-draw; OpenGL 3.3 retains instanced drawing. Tutorial clearings protect its authored route and pickups; the main game's routes, tree placement, supplies and balance remain unchanged.
+The tutorial keeps the original v1.6 teaching sequence and extends its route for compass practice while using the **same chunk, terrain and tree generator as Play**. Both forests use seeded curved trunks, asymmetric tubular boughs, three forks per bough and fixed twig-and-leaf sprays. Each spray has seven leaf pairs and its own permanent orientation, giving 756–1,008 leaf shapes per tree. The tree has the same geometry and materials at every distance and angle: no branch removal, leaf enlargement, camera-facing billboards or distance-based substitutions. Standing trees use immutable indexed GPU buffers; falling trees use matching instanced geometry and rigid poses. Indirect commands upload once per foliage pass. Spatial culling uses geometry bounds, and illumination stays in world space when the camera turns. OpenGL 4.3 uses multi-draw indirect, with indexed drawing/instancing on OpenGL 3.3. Tutorial clearings protect its authored route and pickups; placement, supplies and ordinary-enemy balance stay unchanged.
 
 Movement, looking, supply use, compass crafting, material gathering, spear crafting and the dog encounter remain. After combat, collect five rocks and four sticks, now spread along alternating sides of the path, then craft an axe and **chop any reachable tree**. The practice step **sets health to 85 once**. Collect leaves, craft/use a bandage, then equip the compass and follow the extended trail to the beacon, 80 path metres (roughly 57 metres directly in seed 42) beyond the axe-material station. Starting health remains 80. Inventory, tree state and encounters stay isolated from Play. Pickup labels follow the actual item projection; the objective arrow, world marker and nearby interaction use the same target. Instructions name the action and relevant key, start centred, and settle lower in yellow with the original readable PSF text. Larger contextual arrows connect explicit action labels to the required hotbar slot, recipe, Craft or Close button. Consumption shows a wide progress strip above the hotbar. A larger red HUD arrow includes an explicit turn instruction; a red arrow follows the terrain towards the same waypoint. Directional arrows hide during the final beacon lesson so the player practises compass navigation. H opens controls; R replays after completion.
 
 Trees fall directly **away from the chopping position**, and keep that direction even when the player moves. Obstructions stop the fall instead of redirecting it. Damage uses the moving trunk’s actual radius and a new contact, with the stationary base excluded; standing close on the chopping side causes no proximity damage. Moving into a falling trunk can still cause one 99-HP hit. The axe’s resting blade now points straight forward relative to the camera.
 
-Run `bash tests/run_canopy_checks.sh` for the current validation suite. Each compilation, dependency check, unit-test batch, seed check, tutorial simulation, screenshot process and launch smoke test has a ten-second deadline. Heavier suites are split into smaller batches. The launch smoke test intentionally stops with status 124 after verifying clean title frames and shutting down the background worker; functional test processes must exit successfully. The v1.7 and tutorial-restore entry points forward to this suite. Historical validation scripts and reports describe their original builds.
+Run `bash tests/run_stable_combat_checks.sh` for the current validation suite. Each compilation, dependency check, unit-test batch, seed check, tutorial simulation, screenshot process and launch smoke test has a ten-second deadline. Heavier suites are split into smaller batches. The launch smoke test intentionally stops with status 124 after verifying clean title frames and shutting down the background worker; functional test processes must exit successfully. The v1.7 and tutorial-restore entry points forward to this suite. Historical validation scripts and reports describe their original builds.
 
-Tests use SDL offscreen and real OpenGL, with current results under `doc/validation/canopy-performance-2026_10_30/`. Real-process startup probes cover main-first preparation, Tutorial interruption, later main caching and tutorial replay. `tests/bench_canopy.py` records frame timings, driver, scene resolution and screenshots; `tests/probe_startup.py` checks the actual menu/cache path. Human usability and timings remain pending the arranged playtests. Automated traversal establishes availability and sequencing; desktop mouse feel, difficulty assessment and hardware GPU performance still need playtesting. This environment uses Mesa software OpenGL. The legacy Python rasteriser is not an application launch mode.
+Tests use SDL offscreen and real OpenGL, with current results under `doc/validation/stable-combat-2026_10_31/`. Real-process startup probes cover main-first preparation, Tutorial interruption, later main caching and tutorial replay. `tests/bench_canopy.py` records frame timings, driver, scene resolution and screenshots; `tests/probe_startup.py` checks the actual menu/cache path. Human usability and timings remain pending the arranged playtests. Automated traversal establishes availability and sequencing; desktop mouse feel, difficulty assessment and hardware GPU performance still need playtesting. This environment uses Mesa software OpenGL. The legacy Python rasteriser is not an application launch mode.
 
-Hardware rendering keeps the native scene resolution and the existing 60 FPS loop target. Detected software OpenGL drivers cap the 3D scene at 384×216, preserving aspect ratio with crisp nearest-neighbour scaling, to reduce CPU drawing cost. The HUD and original PSF text always render at native window resolution. Text, hotbar surfaces and HUD texture storage are reused between frames. Frame-rate targets still need verification on the release hardware.
+Hardware rendering keeps the native scene resolution and the existing 60 FPS loop target. Detected software OpenGL drivers cap the 3D scene at 288×162, preserving aspect ratio with crisp nearest-neighbour scaling, to reduce CPU drawing cost. The HUD and original PSF text always render at native window resolution. Text, hotbar surfaces and HUD texture storage are reused between frames. Frame-rate targets still need verification on the release hardware.
 
 Streaming retains at most 36 chunks (including up to eight pinned encounter chunks), two pending generation jobs and one generation worker, with no unloaded terrain cache. Rendering uploads at most one changed chunk per frame after initial loading. Exploration is bounded at ±8,192 metres; there is room well beyond the route without an immediate tree-line wall. Per-run edits are in memory, with limits of 4,096 chopped trees, 4,096 saved partial chops and 512 loose stacks. There is no save-to-disk feature. `doc/` and `tests/` remain ignored by the repository's existing Git rules.
 
 _Walking the Walk, Version 1.7, Written by Quan Thai, October 2026_
-
 
 The v1.7 runner includes readability, damage-through-consumption, directional hit, exact PSF pixel and power-attack regressions. The original font renderer reference lives in `tests/fixtures/original_psf_ui.py`; no temporary old-game checkout is required. Normal spear and axe swings remain free. Power attacks retain the existing range, guard and hit checks; both mouse buttons share recovery so alternating them cannot bypass the power cooldown.
 
