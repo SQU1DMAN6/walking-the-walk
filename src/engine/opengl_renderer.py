@@ -1,6 +1,7 @@
 try:
     import OpenGL.GL as gl
     import OpenGL.GL.shaders as shaders
+
     HAS_OPENGL = True
     print("Say Hi to OpenGL!")
 except Exception:
@@ -10,10 +11,11 @@ except Exception:
 import ctypes
 import math
 import random
-import numpy as np
-from engine.scene_target import SceneTarget
-from engine.foliage_renderer import FoliageRenderer,upload_leaf_tiles
 
+import numpy as np
+
+from engine.foliage_renderer import FoliageRenderer, upload_leaf_tiles
+from engine.scene_target import SceneTarget
 
 
 def _generate_leaf_texture(size=64):
@@ -22,8 +24,13 @@ def _generate_leaf_texture(size=64):
     pixels = bytearray(size * size * 4)
 
     leaf_colours = [
-        (65, 120, 50), (80, 140, 55), (95, 130, 60),
-        (110, 150, 65), (140, 160, 70), (55, 100, 45), (75, 110, 50),
+        (65, 120, 50),
+        (80, 140, 55),
+        (95, 130, 60),
+        (110, 150, 65),
+        (140, 160, 70),
+        (55, 100, 45),
+        (75, 110, 50),
     ]
 
     blobs = []
@@ -37,7 +44,21 @@ def _generate_leaf_texture(size=64):
         colour = rng.choice(leaf_colours)
         crisp = rng.uniform(0.5, 1.5)
         tip_variation = rng.uniform(0.0, 0.3)
-        blobs.append((cx, cy, rx, ry, ca, sa, colour[0], colour[1], colour[2], crisp, tip_variation))
+        blobs.append(
+            (
+                cx,
+                cy,
+                rx,
+                ry,
+                ca,
+                sa,
+                colour[0],
+                colour[1],
+                colour[2],
+                crisp,
+                tip_variation,
+            )
+        )
 
     for py in range(size):
         for px in range(size):
@@ -46,7 +67,7 @@ def _generate_leaf_texture(size=64):
             max_coverage = 0.0
             best_r = best_g = best_b = 0
 
-            for (cx, cy, rx, ry, ca, sa, lr, lg, lb, crisp, tip_var) in blobs:
+            for cx, cy, rx, ry, ca, sa, lr, lg, lb, crisp, tip_var in blobs:
                 dx = u - cx
                 dy = v - cy
                 lu = dx * ca + dy * sa
@@ -63,20 +84,39 @@ def _generate_leaf_texture(size=64):
 
             idx = (py * size + px) * 4
             if max_coverage > 0.08:
-                vein = 0.85 + 0.15 * math.sin(u * 15 + v * 12) * math.sin(v * 20 - u * 8)
+                vein = 0.85 + 0.15 * math.sin(u * 15 + v * 12) * math.sin(
+                    v * 20 - u * 8
+                )
                 spot = 0.9 + 0.1 * math.sin(u * 40 + v * 30) * math.cos(v * 25 - u * 35)
-                pixels[idx] = int(min(255, best_r * vein * spot * (0.6 + 0.4 * max_coverage)))
-                pixels[idx + 1] = int(min(255, best_g * vein * spot * (0.6 + 0.4 * max_coverage)))
-                pixels[idx + 2] = int(min(255, best_b * vein * spot * (0.6 + 0.4 * max_coverage)))
-                alpha_noise = 0.85 + 0.15 * math.sin(u * 50 + v * 45) * math.cos(v * 35 - u * 40)
+                pixels[idx] = int(
+                    min(255, best_r * vein * spot * (0.6 + 0.4 * max_coverage))
+                )
+                pixels[idx + 1] = int(
+                    min(255, best_g * vein * spot * (0.6 + 0.4 * max_coverage))
+                )
+                pixels[idx + 2] = int(
+                    min(255, best_b * vein * spot * (0.6 + 0.4 * max_coverage))
+                )
+                alpha_noise = 0.85 + 0.15 * math.sin(u * 50 + v * 45) * math.cos(
+                    v * 35 - u * 40
+                )
                 pixels[idx + 3] = int(min(255, max_coverage * 255 * alpha_noise))
             else:
-                pixels[idx:idx + 4] = b'\x00\x00\x00\x00'
+                pixels[idx : idx + 4] = b"\x00\x00\x00\x00"
 
     tex_id = gl.glGenTextures(1)
     gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
-    gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, size, size, 0,
-                    gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, bytes(pixels))
+    gl.glTexImage2D(
+        gl.GL_TEXTURE_2D,
+        0,
+        gl.GL_RGBA,
+        size,
+        size,
+        0,
+        gl.GL_RGBA,
+        gl.GL_UNSIGNED_BYTE,
+        bytes(pixels),
+    )
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_REPEAT)
@@ -86,9 +126,18 @@ def _generate_leaf_texture(size=64):
 
 
 class BatchGroup:
-
-
-    __slots__ = ('colour', 'use_texture', 'vertex_data', 'vertex_count', 'vbo','kind','center','radius','vaos','first')
+    __slots__ = (
+        "colour",
+        "use_texture",
+        "vertex_data",
+        "vertex_count",
+        "vbo",
+        "kind",
+        "center",
+        "radius",
+        "vaos",
+        "first",
+    )
 
     def __init__(self, colour, use_texture, vertex_data, vertex_count, vbo):
         self.colour = colour
@@ -96,75 +145,135 @@ class BatchGroup:
         self.vertex_data = vertex_data
         self.vertex_count = vertex_count
         self.vbo = vbo
-        self.kind,self.center,self.radius,self.vaos,self.first="mesh",(0,0,0),0,[],0
+        self.kind, self.center, self.radius, self.vaos, self.first = (
+            "mesh",
+            (0, 0, 0),
+            0,
+            [],
+            0,
+        )
 
 
 def _mesh_array(mesh):
-    faces=np.asarray(mesh.faces,dtype=np.int32)
-    vertices=np.asarray(mesh.vertices,dtype=np.float32)
-    points=vertices[faces]
-    normals=np.cross(points[:,1]-points[:,0],points[:,2]-points[:,0])
-    normals/=np.maximum(np.linalg.norm(normals,axis=1,keepdims=True),1e-9)
-    data=np.empty((len(faces),3,11),dtype=np.float32)
-    data[:,:,:3]=points+mesh.position;data[:,:,3:6]=normals[:,None,:]
-    data[:,:,6:8]=np.asarray(mesh.texcoords)[faces] if mesh.texcoords else 0
-    data[:,:,8:11]=np.asarray(mesh.vertex_colours)[faces] if mesh.vertex_colours else mesh.colour
-    return data.reshape(-1,11)
+    faces = np.asarray(mesh.faces, dtype=np.int32)
+    vertices = np.asarray(mesh.vertices, dtype=np.float32)
+    points = vertices[faces]
+    normals = np.cross(points[:, 1] - points[:, 0], points[:, 2] - points[:, 0])
+    normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-9)
+    data = np.empty((len(faces), 3, 11), dtype=np.float32)
+    data[:, :, :3] = points + mesh.position
+    data[:, :, 3:6] = normals[:, None, :]
+    data[:, :, 6:8] = np.asarray(mesh.texcoords)[faces] if mesh.texcoords else 0
+    data[:, :, 8:11] = (
+        np.asarray(mesh.vertex_colours)[faces] if mesh.vertex_colours else mesh.colour
+    )
+    return data.reshape(-1, 11)
 
 
-def pack_meshes(meshes,lods=True):
-    groups={}
+def pack_meshes(meshes, lods=True):
+    groups = {}
     for mesh in meshes:
-        tile=(math.floor(mesh.position[0]/8),math.floor(mesh.position[2]/8))
-        if hasattr(mesh,'leaf_instances') or hasattr(mesh,'branch_instances'):
-            kind='foliage' if hasattr(mesh,'leaf_instances') else 'limbs'
-            data=(mesh.leaf_instances if kind=='foliage' else mesh.branch_instances).copy();data[:,:3]+=mesh.position
-            groups.setdefault((kind,*tile),[]).append(data)
+        tile = (math.floor(mesh.position[0] / 8), math.floor(mesh.position[2] / 8))
+        if hasattr(mesh, "leaf_instances") or hasattr(mesh, "branch_instances"):
+            kind = "foliage" if hasattr(mesh, "leaf_instances") else "limbs"
+            data = (
+                mesh.leaf_instances if kind == "foliage" else mesh.branch_instances
+            ).copy()
+            data[:, :3] += mesh.position
+            groups.setdefault((kind, *tile), []).append(data)
         elif mesh.faces:
-            key=('mesh',mesh.texcoords is not None,*tile) if lods else mesh.texcoords is not None
-            groups.setdefault(key,[]).append(_mesh_array(mesh))
-    return [(kind,np.concatenate(parts)) for kind,parts in groups.items()]
+            key = (
+                ("mesh", mesh.texcoords is not None, *tile)
+                if lods
+                else mesh.texcoords is not None
+            )
+            groups.setdefault(key, []).append(_mesh_array(mesh))
+    return [(kind, np.concatenate(parts)) for kind, parts in groups.items()]
 
 
 def release_batches(batches):
-    vaos=set();vbos=set()
+    vaos = set()
+    vbos = set()
     for batch in batches:
         vaos.update(v for v in batch.vaos if v is not None)
-        if batch.kind in ('foliage','limbs'):vaos.add(batch.common_vao)
+        if batch.kind in ("foliage", "limbs"):
+            vaos.add(batch.common_vao)
         vbos.add(batch.vbo)
-    if vaos:gl.glDeleteVertexArrays(len(vaos),list(vaos))
-    if vbos:gl.glDeleteBuffers(len(vbos),list(vbos))
+    if vaos:
+        gl.glDeleteVertexArrays(len(vaos), list(vaos))
+    if vbos:
+        gl.glDeleteBuffers(len(vbos), list(vbos))
 
 
 def upload_batches(packed):
-    batches=[]
+    batches = []
     try:
-        for material in ('foliage','limbs'):
-            arrays=[data for kind,data in packed if isinstance(kind,tuple) and kind[0]==material]
-            if arrays:batches.extend(upload_leaf_tiles(arrays,material))
-        entries=[(kind,data) for kind,data in packed if not (isinstance(kind,tuple) and kind[0] in ('foliage','limbs'))]
-        if not entries:return batches
-        combined=np.concatenate([data for _,data in entries]);vbo=gl.glGenBuffers(1)
-        batch=BatchGroup((255,255,255),False,None,0,vbo);batches.append(batch)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER,vbo)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER,combined.nbytes,combined,gl.GL_STATIC_DRAW)
-        vao=gl.glGenVertexArrays(1);batch.vaos=[vao];gl.glBindVertexArray(vao)
-        for location,size,offset in ((0,3,0),(1,3,12),(2,2,24),(3,3,32)):
+        for material in ("foliage", "limbs"):
+            arrays = [
+                data
+                for kind, data in packed
+                if isinstance(kind, tuple) and kind[0] == material
+            ]
+            if arrays:
+                batches.extend(upload_leaf_tiles(arrays, material))
+        entries = [
+            (kind, data)
+            for kind, data in packed
+            if not (isinstance(kind, tuple) and kind[0] in ("foliage", "limbs"))
+        ]
+        if not entries:
+            return batches
+        combined = np.concatenate([data for _, data in entries])
+        vbo = gl.glGenBuffers(1)
+        batch = BatchGroup((255, 255, 255), False, None, 0, vbo)
+        batches.append(batch)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
+        gl.glBufferData(
+            gl.GL_ARRAY_BUFFER, combined.nbytes, combined, gl.GL_STATIC_DRAW
+        )
+        vao = gl.glGenVertexArrays(1)
+        batch.vaos = [vao]
+        gl.glBindVertexArray(vao)
+        for location, size, offset in ((0, 3, 0), (1, 3, 12), (2, 2, 24), (3, 3, 32)):
             gl.glEnableVertexAttribArray(location)
-            gl.glVertexAttribPointer(location,size,gl.GL_FLOAT,False,44,ctypes.c_void_p(offset))
-        offset=0
-        for index,(kind,data) in enumerate(entries):
-            group=batch if index==0 else BatchGroup((255,255,255),False,None,0,vbo)
-            if index:batches.append(group)
-            group.vaos=[vao];group.first=offset;group.vertex_count=len(data);offset+=len(data)
-            group.use_texture=kind if isinstance(kind,bool) else kind[1] if kind[0]=='mesh' else False
-            if isinstance(kind,tuple):
-                group.center=tuple(float(v) for v in (data[:,:3].min(axis=0)+data[:,:3].max(axis=0))/2)
-                group.radius=float(np.linalg.norm(data[:,:3].max(axis=0)-data[:,:3].min(axis=0))/2)
+            gl.glVertexAttribPointer(
+                location, size, gl.GL_FLOAT, False, 44, ctypes.c_void_p(offset)
+            )
+        offset = 0
+        for index, (kind, data) in enumerate(entries):
+            group = (
+                batch
+                if index == 0
+                else BatchGroup((255, 255, 255), False, None, 0, vbo)
+            )
+            if index:
+                batches.append(group)
+            group.vaos = [vao]
+            group.first = offset
+            group.vertex_count = len(data)
+            offset += len(data)
+            group.use_texture = (
+                kind
+                if isinstance(kind, bool)
+                else kind[1]
+                if kind[0] == "mesh"
+                else False
+            )
+            if isinstance(kind, tuple):
+                group.center = tuple(
+                    float(v)
+                    for v in (data[:, :3].min(axis=0) + data[:, :3].max(axis=0)) / 2
+                )
+                group.radius = float(
+                    np.linalg.norm(data[:, :3].max(axis=0) - data[:, :3].min(axis=0))
+                    / 2
+                )
     except Exception:
         release_batches(batches)
         raise
-    finally:gl.glBindVertexArray(0);gl.glBindBuffer(gl.GL_ARRAY_BUFFER,0)
+    finally:
+        gl.glBindVertexArray(0)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
     return batches
 
 
@@ -173,15 +282,20 @@ def build_batches(meshes):
 
 
 class OpenGLRenderer:
-    def visible(self,camera,x,y,z,radius):
-        dx,dy,dz = x-camera.x,y-camera.y,z-camera.z
-        cy,sy = math.cos(camera.yaw),math.sin(camera.yaw)
-        rx,forward = dx*cy-dz*sy,dx*sy+dz*cy
-        cp,sp = math.cos(camera.pitch),math.sin(camera.pitch)
-        vertical,depth = dy*cp+forward*sp,-dy*sp+forward*cp
-        return (depth+radius>self.near and depth-radius<self.fog_far+8
-                and abs(rx)<max(0,depth)*self.width/(2*self.focal_length)+radius*1.5
-                and abs(vertical)<max(0,depth)*self.height/(2*self.focal_length)+radius*1.5)
+    def visible(self, camera, x, y, z, radius):
+        dx, dy, dz = x - camera.x, y - camera.y, z - camera.z
+        cy, sy = math.cos(camera.yaw), math.sin(camera.yaw)
+        rx, forward = dx * cy - dz * sy, dx * sy + dz * cy
+        cp, sp = math.cos(camera.pitch), math.sin(camera.pitch)
+        vertical, depth = dy * cp + forward * sp, -dy * sp + forward * cp
+        return (
+            depth + radius > self.near
+            and depth - radius < self.fog_far + 8
+            and abs(rx)
+            < max(0, depth) * self.width / (2 * self.focal_length) + radius * 1.5
+            and abs(vertical)
+            < max(0, depth) * self.height / (2 * self.focal_length) + radius * 1.5
+        )
 
     def __init__(self, width, height):
         self.width = width
@@ -190,14 +304,11 @@ class OpenGLRenderer:
         self.near = 0.1
         self.far = 200.0
 
-
         self.vao = gl.glGenVertexArrays(1)
         self.dynamic_vbo = gl.glGenBuffers(1)
         self._dynamic_capacity = 0
 
-
         self._sprite_tex_cache = {}
-
 
         self._batch_data = []
 
@@ -336,23 +447,20 @@ class OpenGLRenderer:
 
         self.leaf_tex_id = _generate_leaf_texture(64)
 
-
         sun_dir = (0.4, -0.8, 0.4)
         sd_len = math.sqrt(sun_dir[0] ** 2 + sun_dir[1] ** 2 + sun_dir[2] ** 2)
         self.sun_world = (sun_dir[0] / sd_len, sun_dir[1] / sd_len, sun_dir[2] / sd_len)
 
-
         self.fog_color = (0.82, 0.66, 0.48)
-
 
         self.fog_near = 25.0
         self.fog_far = 70.0
 
         # Vertex layout: position(3), normal(3), uv(2), colour(3).
         self._stride = 11 * 4
-        self.foliage=FoliageRenderer(self)
-        self.resolution_scale=1.
-        self.scene_target=SceneTarget(self)
+        self.foliage = FoliageRenderer(self)
+        self.resolution_scale = 1.0
+        self.scene_target = SceneTarget(self)
 
     def _set_camera_uniforms(self, camera):
         cy = math.cos(camera.yaw)
@@ -360,14 +468,12 @@ class OpenGLRenderer:
         cp = math.cos(-camera.pitch)
         sp = math.sin(-camera.pitch)
 
-
         ex, ey, ez = camera.eye_position()
         gl.glUniform3f(self.cam_pos_loc, ex, ey, ez)
         gl.glUniform1f(self.cos_yaw_loc, cy)
         gl.glUniform1f(self.sin_yaw_loc, sy)
         gl.glUniform1f(self.cos_pitch_loc, cp)
         gl.glUniform1f(self.sin_pitch_loc, sp)
-
 
         lx, ly, lz = self.sun_world
         rx = lx * cy + lz * sy
@@ -385,8 +491,9 @@ class OpenGLRenderer:
         gl.glUniform1f(self.ambient_loc, 0.45)
         gl.glUniform1f(self.diffuse_loc, 0.55)
 
-
-        gl.glUniform3f(self.fog_color_loc, self.fog_color[0], self.fog_color[1], self.fog_color[2])
+        gl.glUniform3f(
+            self.fog_color_loc, self.fog_color[0], self.fog_color[1], self.fog_color[2]
+        )
         gl.glUniform1f(self.fog_near_loc, self.fog_near)
         gl.glUniform1f(self.fog_far_loc, self.fog_far)
         gl.glUniform1f(self.alpha_loc, 1.0)
@@ -395,49 +502,79 @@ class OpenGLRenderer:
 
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
         gl.glEnableVertexAttribArray(0)
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(0))
+        gl.glVertexAttribPointer(
+            0, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(0)
+        )
         gl.glEnableVertexAttribArray(1)
-        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(3 * 4))
+        gl.glVertexAttribPointer(
+            1, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(3 * 4)
+        )
         gl.glEnableVertexAttribArray(2)
-        gl.glVertexAttribPointer(2, 2, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(6 * 4))
+        gl.glVertexAttribPointer(
+            2, 2, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(6 * 4)
+        )
         gl.glEnableVertexAttribArray(3)
-        gl.glVertexAttribPointer(3, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(8 * 4))
+        gl.glVertexAttribPointer(
+            3, 3, gl.GL_FLOAT, False, self._stride, ctypes.c_void_p(8 * 4)
+        )
 
-    def render_frame(self,camera,batches):
+    def render_frame(self, camera, batches):
         self.foliage.begin_frame()
-        gl.glUseProgram(self.shader);self._set_camera_uniforms(camera)
-        gl.glActiveTexture(gl.GL_TEXTURE0);gl.glBindTexture(gl.GL_TEXTURE_2D,self.leaf_tex_id)
-        gl.glUniform1i(self.texture_loc,0)
-        leaves=[];draws={}
+        gl.glUseProgram(self.shader)
+        self._set_camera_uniforms(camera)
+        gl.glActiveTexture(gl.GL_TEXTURE0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
+        gl.glUniform1i(self.texture_loc, 0)
+        leaves = []
+        draws = {}
         for batch in batches:
-            if batch.kind in ('foliage','limbs'):leaves.append((batch,None));continue
-            if batch.radius and not self.visible(camera,*batch.center,batch.radius):continue
-            if not batch.vertex_count:continue
-            draws.setdefault((batch.vaos[0],batch.use_texture),[]).append((batch.first,batch.vertex_count))
-        for (vao,texture),entries in draws.items():
-            gl.glBindVertexArray(vao);gl.glUniform1i(self.use_texture_loc,int(texture))
-            first,count=np.asarray(entries,dtype=np.int32).T.copy()
-            gl.glMultiDrawArrays(gl.GL_TRIANGLES,first,count,len(entries))
-        gl.glBindVertexArray(0);gl.glUseProgram(0)
-        leaves.sort(key=lambda entry:math.dist(entry[0].center,(camera.x,camera.y,camera.z)))
-        self.foliage.draw(camera,leaves)
+            if batch.kind in ("foliage", "limbs"):
+                leaves.append((batch, None))
+                continue
+            if batch.radius and not self.visible(camera, *batch.center, batch.radius):
+                continue
+            if not batch.vertex_count:
+                continue
+            draws.setdefault((batch.vaos[0], batch.use_texture), []).append(
+                (batch.first, batch.vertex_count)
+            )
+        for (vao, texture), entries in draws.items():
+            gl.glBindVertexArray(vao)
+            gl.glUniform1i(self.use_texture_loc, int(texture))
+            first, count = np.asarray(entries, dtype=np.int32).T.copy()
+            gl.glMultiDrawArrays(gl.GL_TRIANGLES, first, count, len(entries))
+        gl.glBindVertexArray(0)
+        gl.glUseProgram(0)
+        leaves.sort(
+            key=lambda entry: math.dist(entry[0].center, (camera.x, camera.y, camera.z))
+        )
+        self.foliage.draw(camera, leaves)
 
     def _surface_to_gl_texture(self, surface):
 
-
         import pygame
+
         key = id(surface)
         tex_id = self._sprite_tex_cache.get(key)
         if tex_id is not None:
             return tex_id
 
         data = pygame.image.tostring(
-            pygame.transform.flip(surface, False, True), "RGBA", False)
+            pygame.transform.flip(surface, False, True), "RGBA", False
+        )
         tex_id = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA,
-                        surface.get_width(), surface.get_height(), 0,
-                        gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, data)
+        gl.glTexImage2D(
+            gl.GL_TEXTURE_2D,
+            0,
+            gl.GL_RGBA,
+            surface.get_width(),
+            surface.get_height(),
+            0,
+            gl.GL_RGBA,
+            gl.GL_UNSIGNED_BYTE,
+            data,
+        )
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
@@ -448,10 +585,9 @@ class OpenGLRenderer:
 
     def render_billboard(self, camera, surface, x, y, z, width, height):
 
-
         import pygame
-        tex_id = self._surface_to_gl_texture(surface)
 
+        tex_id = self._surface_to_gl_texture(surface)
 
         cy = math.cos(camera.yaw)
         sy = math.sin(camera.yaw)
@@ -459,10 +595,8 @@ class OpenGLRenderer:
         rx = cy
         rz = -sy
 
-
         hw = width * 0.5
         hh = height * 0.5
-
 
         corners = [
             (x - rx * hw, y, z - rz * hw),
@@ -470,7 +604,6 @@ class OpenGLRenderer:
             (x + rx * hw, y + hh, z + rz * hw),
             (x - rx * hw, y + hh, z - rz * hw),
         ]
-
 
         data = []
 
@@ -491,7 +624,6 @@ class OpenGLRenderer:
         gl.glUseProgram(self.shader)
         self._set_camera_uniforms(camera)
 
-
         gl.glActiveTexture(gl.GL_TEXTURE0)
         gl.glBindTexture(gl.GL_TEXTURE_2D, tex_id)
         gl.glUniform1i(self.texture_loc, 0)
@@ -502,7 +634,6 @@ class OpenGLRenderer:
         arr = (gl.GLfloat * len(data))(*data)
         gl.glBufferData(gl.GL_ARRAY_BUFFER, ctypes.sizeof(arr), arr, gl.GL_STREAM_DRAW)
         self._dynamic_capacity = ctypes.sizeof(arr)
-
 
         colour_array = (gl.GLfloat * 3)(255.0, 255.0, 255.0)
         gl.glUniform3fv(self.color_loc, 1, colour_array)
@@ -519,62 +650,79 @@ class OpenGLRenderer:
         gl.glUseProgram(0)
 
     def render_mesh_dynamic(self, camera, mesh, x, y, z, yaw=0.0, alpha=None):
-        self.render_models(camera,[(mesh,x,y,z,yaw)],alpha)
+        self.render_models(camera, [(mesh, x, y, z, yaw)], alpha)
 
-    def render_models(self,camera,instances,alpha=None):
-        groups = {};leaves=[]
-        for mesh,x,y,z,yaw in instances:
-            if hasattr(getattr(mesh,'source',mesh),'leaf_instances') or hasattr(getattr(mesh,'source',mesh),'branch_instances'):
-                leaves.append((mesh,x,y,z,yaw));continue
+    def render_models(self, camera, instances, alpha=None):
+        groups = {}
+        leaves = []
+        for mesh, x, y, z, yaw in instances:
+            if hasattr(getattr(mesh, "source", mesh), "leaf_instances") or hasattr(
+                getattr(mesh, "source", mesh), "branch_instances"
+            ):
+                leaves.append((mesh, x, y, z, yaw))
+                continue
             if not mesh.faces:
                 continue
-            source = getattr(mesh,'source',mesh)
-            cached = getattr(source,'_packed_dynamic',None)
+            source = getattr(mesh, "source", mesh)
+            cached = getattr(source, "_packed_dynamic", None)
             if cached is None:
-                cached = pack_meshes([source],lods=False)[0][1]
+                cached = pack_meshes([source], lods=False)[0][1]
                 source._packed_dynamic = cached
             data = cached.copy()
             if source is not mesh:
-                rotation,offset = np.eye(3,dtype=np.float32),np.zeros(3,dtype=np.float32)
-                for pivot,pitch,turn in mesh.rotations:
-                    cp,sp,ct,st = math.cos(pitch),math.sin(pitch),math.cos(turn),math.sin(turn)
-                    matrix = np.array(((ct,st*sp,st*cp),(0,cp,-sp),(-st,ct*sp,ct*cp)),dtype=np.float32)
-                    pivot = np.asarray(pivot,dtype=np.float32)
-                    offset = matrix@offset+pivot-matrix@pivot
-                    rotation = matrix@rotation
-                data[:,:3] = data[:,:3]@rotation.T+offset+mesh.translation
-                data[:,3:6] = data[:,3:6]@rotation.T
-            cy,sy = math.cos(yaw),math.sin(yaw)
+                rotation, offset = (
+                    np.eye(3, dtype=np.float32),
+                    np.zeros(3, dtype=np.float32),
+                )
+                for pivot, pitch, turn in mesh.rotations:
+                    cp, sp, ct, st = (
+                        math.cos(pitch),
+                        math.sin(pitch),
+                        math.cos(turn),
+                        math.sin(turn),
+                    )
+                    matrix = np.array(
+                        ((ct, st * sp, st * cp), (0, cp, -sp), (-st, ct * sp, ct * cp)),
+                        dtype=np.float32,
+                    )
+                    pivot = np.asarray(pivot, dtype=np.float32)
+                    offset = matrix @ offset + pivot - matrix @ pivot
+                    rotation = matrix @ rotation
+                data[:, :3] = data[:, :3] @ rotation.T + offset + mesh.translation
+                data[:, 3:6] = data[:, 3:6] @ rotation.T
+            cy, sy = math.cos(yaw), math.sin(yaw)
             # Placement is already supplied by the caller, including mesh.position.
-            vertices = data[:,:3]-mesh.position
-            data[:,0] = vertices[:,0]*cy+vertices[:,2]*sy+x
-            data[:,1] = vertices[:,1]+y
-            data[:,2] = -vertices[:,0]*sy+vertices[:,2]*cy+z
-            nx,nz = data[:,3].copy(),data[:,5].copy()
-            data[:,3],data[:,5] = nx*cy+nz*sy,-nx*sy+nz*cy
-            groups.setdefault(mesh.texcoords is not None,[]).append(data)
+            vertices = data[:, :3] - mesh.position
+            data[:, 0] = vertices[:, 0] * cy + vertices[:, 2] * sy + x
+            data[:, 1] = vertices[:, 1] + y
+            data[:, 2] = -vertices[:, 0] * sy + vertices[:, 2] * cy + z
+            nx, nz = data[:, 3].copy(), data[:, 5].copy()
+            data[:, 3], data[:, 5] = nx * cy + nz * sy, -nx * sy + nz * cy
+            groups.setdefault(mesh.texcoords is not None, []).append(data)
         if not groups:
-            self.foliage.draw_models(camera,leaves,alpha)
+            self.foliage.draw_models(camera, leaves, alpha)
             return
         gl.glUseProgram(self.shader)
         self._set_camera_uniforms(camera)
         gl.glActiveTexture(gl.GL_TEXTURE0)
-        gl.glBindTexture(gl.GL_TEXTURE_2D,self.leaf_tex_id)
-        gl.glUniform1i(self.texture_loc,0)
-        gl.glUniform1f(self.alpha_loc,1 if alpha is None else alpha)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.leaf_tex_id)
+        gl.glUniform1i(self.texture_loc, 0)
+        gl.glUniform1f(self.alpha_loc, 1 if alpha is None else alpha)
         gl.glBindVertexArray(self.vao)
         self._define_attribs(self.dynamic_vbo)
-        for texture,parts in groups.items():
+        for texture, parts in groups.items():
             data = np.concatenate(parts)
-            if data.nbytes>self._dynamic_capacity:
-                self._dynamic_capacity = 1 << max(10,(data.nbytes-1).bit_length())
-                gl.glBufferData(gl.GL_ARRAY_BUFFER,self._dynamic_capacity,None,gl.GL_STREAM_DRAW)
-            gl.glBufferSubData(gl.GL_ARRAY_BUFFER,0,data.nbytes,data)
-            gl.glUniform1i(self.use_texture_loc,int(texture))
-            gl.glDrawArrays(gl.GL_TRIANGLES,0,len(data))
+            if data.nbytes > self._dynamic_capacity:
+                self._dynamic_capacity = 1 << max(10, (data.nbytes - 1).bit_length())
+                gl.glBufferData(
+                    gl.GL_ARRAY_BUFFER, self._dynamic_capacity, None, gl.GL_STREAM_DRAW
+                )
+            gl.glBufferSubData(gl.GL_ARRAY_BUFFER, 0, data.nbytes, data)
+            gl.glUniform1i(self.use_texture_loc, int(texture))
+            gl.glDrawArrays(gl.GL_TRIANGLES, 0, len(data))
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
-        self.foliage.draw_models(camera,leaves,alpha)
+        self.foliage.draw_models(camera, leaves, alpha)
 
     def close(self):
         self.scene_target.close()

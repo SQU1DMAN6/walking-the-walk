@@ -1,10 +1,9 @@
 import math
+
 import pygame
 
 
 class Camera:
-
-
     def __init__(self, radius=0.4):
         self.x = 0.0
         self.y = 0.0
@@ -17,7 +16,6 @@ class Camera:
         self.sprint_factor = 2.9
         self.mouse_sensitivity = 0.003
 
-
         self.max_health = 100.0
         self.health = 100.0
         self.max_stamina = 200.0
@@ -25,11 +23,9 @@ class Camera:
         self.exhausted = False
         self.grab_active = False
 
-
         self.radius = radius
         self.obstacles = []
         self.bounds = None
-
 
         self.terrain_height_cb = None
         self.movement_cb = None
@@ -37,16 +33,13 @@ class Camera:
 
         self.pivot_offset = -0.2
 
-
         self._bob_phase = 0.0
         self._bob_active = 0.0
         self.bob_offset = 0.0
 
-
         self.sprinting = False
         self.sprint_blocked = False
         self.survival_stamina = False
-
 
     def forward_vec(self):
         return (math.sin(self.yaw), math.cos(self.yaw))
@@ -74,7 +67,7 @@ class Camera:
 
     def resolve_collision(self, px, pz):
 
-        for (cx, cz, r, _height) in self.obstacles:
+        for cx, cz, r, _height in self.obstacles:
             dx = px - cx
             dz = pz - cz
             dist = math.sqrt(dx * dx + dz * dz)
@@ -87,7 +80,6 @@ class Camera:
             elif dist <= 1e-6:
                 px = cx + min_dist
         return px, pz
-
 
     def update(self, dt, mouse_delta=None):
         dt = max(0.0, min(dt, 0.1))
@@ -119,26 +111,26 @@ class Camera:
             mx /= n
             mz /= n
 
-
         want_sprint = n > 0.0 and (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
-        
 
         can_sprint = want_sprint and self.stamina >= 20.0
         self.sprint_blocked = want_sprint and not can_sprint
         sprinting = can_sprint and n > 0.0
-        
 
         if sprinting:
             drain_factor = 0.5 + 0.5 * (1.0 - self.stamina / self.max_stamina)
-            self.stamina = max(0.0, self.stamina - 12.0 * dt * (0.7 + 0.3 * drain_factor))
+            self.stamina = max(
+                0.0, self.stamina - 12.0 * dt * (0.7 + 0.3 * drain_factor)
+            )
         elif self.survival_stamina:
-            self.stamina = min(self.max_stamina,self.stamina+(8 if n>0 else 25)*dt)
+            self.stamina = min(
+                self.max_stamina, self.stamina + (8 if n > 0 else 25) * dt
+            )
         elif n > 0.0 and self.stamina < 20.0:
-
             self.stamina = max(0.0, self.stamina - 1.0 * dt)
         else:
             self.stamina = min(self.max_stamina, self.stamina + 25.0 * dt)
-        
+
         self.exhausted = want_sprint and self.stamina <= 0.0
         self.sprinting = sprinting
 
@@ -152,25 +144,23 @@ class Camera:
         nx = self.x + mx * speed * dt
         nz = self.z + mz * speed * dt
 
-
         if self.movement_cb is not None:
-            nx, nz = self.movement_cb(self.x, self.z, nx-self.x, nz-self.z, self.radius)
+            nx, nz = self.movement_cb(
+                self.x, self.z, nx - self.x, nz - self.z, self.radius
+            )
         else:
             nx, nz = self.resolve_collision(nx, nz)
 
-
         if self.bounds is not None:
             (minx, maxx, minz, maxz) = self.bounds
-            nx = max(minx+self.radius, min(maxx-self.radius, nx))
-            nz = max(minz+self.radius, min(maxz-self.radius, nz))
+            nx = max(minx + self.radius, min(maxx - self.radius, nx))
+            nz = max(minz + self.radius, min(maxz - self.radius, nz))
 
         self.x, self.z = nx, nz
-
 
         ground = self.terrain_y_at(self.x, self.z)
         target_y = ground + self.eye_height
         self.y += (target_y - self.y) * min(1.0, dt * 12.0)
-
 
         moving = n > 0.0
         if moving:
@@ -181,15 +171,17 @@ class Camera:
         bob_speed = speed * 1.4
         self._bob_phase += dt * bob_speed * (1.0 if moving else 0.0)
 
-        self.bob_offset = (
-            math.sin(self._bob_phase * 2.0) * 0.06 * self._bob_active
-        )
+        self.bob_offset = math.sin(self._bob_phase * 2.0) * 0.06 * self._bob_active
 
-        self.apply_mouse_motion(*(pygame.mouse.get_rel() if mouse_delta is None else mouse_delta))
+        self.apply_mouse_motion(
+            *(pygame.mouse.get_rel() if mouse_delta is None else mouse_delta)
+        )
 
     def apply_mouse_motion(self, dx, dy):
         # Relative motion only. No cursor teleport loop.
         if not all(math.isfinite(v) for v in (dx, dy)) or max(abs(dx), abs(dy)) > 512:
             return
-        self.yaw = (self.yaw + dx*self.mouse_sensitivity + math.pi) % math.tau - math.pi
-        self.pitch = max(-1.48, min(1.48, self.pitch + dy*self.mouse_sensitivity))
+        self.yaw = (
+            self.yaw + dx * self.mouse_sensitivity + math.pi
+        ) % math.tau - math.pi
+        self.pitch = max(-1.48, min(1.48, self.pitch + dy * self.mouse_sensitivity))

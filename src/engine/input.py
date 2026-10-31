@@ -23,6 +23,6 @@ class PointerCapture:
         motion = pygame.mouse.get_rel()
 
         if not self.active or self._settling_frames:
-            self._settling_frames = max(0, self._settling_frames-1)
+            self._settling_frames = max(0, self._settling_frames - 1)
             return 0, 0
         return motion

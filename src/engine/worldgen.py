@@ -57,18 +57,11 @@ def get_terrain_height(x, z, seed, height_scale=1.5):
 
 
 def generate_terrain(
-    width,
-    depth,
-    segments,
-    seed,
-    height_scale=1.5,
-    colour=(180, 120, 60)
+    width, depth, segments, seed, height_scale=1.5, colour=(180, 120, 60)
 ):
-
 
     hw = width / 2
     hd = depth / 2
-
 
     heights = []
     for iz in range(segments + 1):
@@ -103,7 +96,6 @@ def generate_terrain(
 
 def _create_foliage_cluster(position, rx, ry, rz, colour):
 
-
     verts = [
         (0.0, ry, 0.0),
         (rx * 0.7, ry * 0.3, rx * 0.7),
@@ -122,20 +114,30 @@ def _create_foliage_cluster(position, rx, ry, rz, colour):
     ]
 
     faces = [
-
-        (0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1),
-
-        (1, 5, 6), (1, 6, 2),
-        (2, 6, 7), (2, 7, 3),
-        (3, 7, 8), (3, 8, 4),
-        (4, 8, 5), (4, 5, 1),
-
-        (5, 9, 10), (5, 10, 6),
-        (6, 10, 11), (6, 11, 7),
-        (7, 11, 12), (7, 12, 8),
-        (8, 12, 9), (8, 9, 5),
-
-        (9, 13, 10), (10, 13, 11), (11, 13, 12), (12, 13, 9),
+        (0, 1, 2),
+        (0, 2, 3),
+        (0, 3, 4),
+        (0, 4, 1),
+        (1, 5, 6),
+        (1, 6, 2),
+        (2, 6, 7),
+        (2, 7, 3),
+        (3, 7, 8),
+        (3, 8, 4),
+        (4, 8, 5),
+        (4, 5, 1),
+        (5, 9, 10),
+        (5, 10, 6),
+        (6, 10, 11),
+        (6, 11, 7),
+        (7, 11, 12),
+        (7, 12, 8),
+        (8, 12, 9),
+        (8, 9, 5),
+        (9, 13, 10),
+        (10, 13, 11),
+        (11, 13, 12),
+        (12, 13, 9),
     ]
 
     return Mesh(verts, faces, colour, position)
@@ -149,15 +151,12 @@ def create_branch(start, end, width, colour):
     if length < 0.001:
         return None
 
-
     nx, ny, nz = dx / length, dy / length, dz / length
-
 
     if abs(ny) > 0.9:
         px, py, pz = 1.0, 0.0, 0.0
     else:
         px, py, pz = 0.0, 1.0, 0.0
-
 
     wx = ny * pz - nz * py
     wy = nz * px - nx * pz
@@ -169,37 +168,44 @@ def create_branch(start, end, width, colour):
     wy /= wlen
     wz /= wlen
 
-
     vx = ny * wz - nz * wy
     vy = nz * wx - nx * wz
     vz = nx * wy - ny * wx
 
     hw = width * 0.5
 
-
     verts = [
         (start[0] + wx * hw, start[1] + wy * hw, start[2] + wz * hw),
-        (start[0] + vx * hw * 0.866 - wx * hw * 0.5,
-         start[1] + vy * hw * 0.866 - wy * hw * 0.5,
-         start[2] + vz * hw * 0.866 - wz * hw * 0.5),
-        (start[0] - vx * hw * 0.866 - wx * hw * 0.5,
-         start[1] - vy * hw * 0.866 - wy * hw * 0.5,
-         start[2] - vz * hw * 0.866 - wz * hw * 0.5),
+        (
+            start[0] + vx * hw * 0.866 - wx * hw * 0.5,
+            start[1] + vy * hw * 0.866 - wy * hw * 0.5,
+            start[2] + vz * hw * 0.866 - wz * hw * 0.5,
+        ),
+        (
+            start[0] - vx * hw * 0.866 - wx * hw * 0.5,
+            start[1] - vy * hw * 0.866 - wy * hw * 0.5,
+            start[2] - vz * hw * 0.866 - wz * hw * 0.5,
+        ),
         (end[0] + wx * hw, end[1] + wy * hw, end[2] + wz * hw),
-        (end[0] + vx * hw * 0.866 - wx * hw * 0.5,
-         end[1] + vy * hw * 0.866 - wy * hw * 0.5,
-         end[2] + vz * hw * 0.866 - wz * hw * 0.5),
-        (end[0] - vx * hw * 0.866 - wx * hw * 0.5,
-         end[1] - vy * hw * 0.866 - wy * hw * 0.5,
-         end[2] - vz * hw * 0.866 - wz * hw * 0.5),
+        (
+            end[0] + vx * hw * 0.866 - wx * hw * 0.5,
+            end[1] + vy * hw * 0.866 - wy * hw * 0.5,
+            end[2] + vz * hw * 0.866 - wz * hw * 0.5,
+        ),
+        (
+            end[0] - vx * hw * 0.866 - wx * hw * 0.5,
+            end[1] - vy * hw * 0.866 - wy * hw * 0.5,
+            end[2] - vz * hw * 0.866 - wz * hw * 0.5,
+        ),
     ]
 
-
     faces = [
-
-        (0, 3, 4), (0, 4, 1),
-        (0, 2, 5), (0, 5, 3),
-        (1, 4, 5), (1, 5, 2),
+        (0, 3, 4),
+        (0, 4, 1),
+        (0, 2, 5),
+        (0, 5, 3),
+        (1, 4, 5),
+        (1, 5, 2),
     ]
 
     return Mesh(verts, faces, colour, position=(0, 0, 0))
@@ -208,13 +214,11 @@ def create_branch(start, end, width, colour):
 def create_tree(position, seed, base_height=4.0):
     rng = random.Random(seed)
 
-
     h_var = rng.uniform(1, 3.5)
     height = base_height * h_var
     trunk_h = height * rng.uniform(0.25, 0.40)
     trunk_base_r = rng.uniform(0.15, 0.40)
     trunk_top_r = trunk_base_r * rng.uniform(0.4, 0.7)
-
 
     lean_angle = rng.uniform(-0.08, 0.08)
     lean_x = math.sin(lean_angle) * trunk_h
@@ -231,7 +235,6 @@ def create_tree(position, seed, base_height=4.0):
 
     meshes = []
 
-
     tb = trunk_base_r
     tt = trunk_top_r
     lx = lean_x
@@ -239,60 +242,62 @@ def create_tree(position, seed, base_height=4.0):
 
     trunk_verts = [
         (-tb, 0.0, -tb),
-        ( tb, 0.0, -tb),
-        ( tb, 0.0,  tb),
-        (-tb, 0.0,  tb),
+        (tb, 0.0, -tb),
+        (tb, 0.0, tb),
+        (-tb, 0.0, tb),
         (-tt + lx, trunk_h * 0.5, -tt + lz),
-        ( tt + lx, trunk_h * 0.5, -tt + lz),
-        ( tt + lx, trunk_h * 0.5,  tt + lz),
-        (-tt + lx, trunk_h * 0.5,  tt + lz),
+        (tt + lx, trunk_h * 0.5, -tt + lz),
+        (tt + lx, trunk_h * 0.5, tt + lz),
+        (-tt + lx, trunk_h * 0.5, tt + lz),
         (-tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),
-        ( tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),
-        ( tt * 0.7 + lx, trunk_h,  tt * 0.7 + lz),
-        (-tt * 0.7 + lx, trunk_h,  tt * 0.7 + lz),
+        (tt * 0.7 + lx, trunk_h, -tt * 0.7 + lz),
+        (tt * 0.7 + lx, trunk_h, tt * 0.7 + lz),
+        (-tt * 0.7 + lx, trunk_h, tt * 0.7 + lz),
     ]
     trunk_faces = [
-
-        (0, 1, 2), (0, 2, 3),
-        (0, 4, 5), (0, 5, 1),
-        (1, 5, 6), (1, 6, 2),
-        (2, 6, 7), (2, 7, 3),
-        (3, 7, 4), (3, 4, 0),
-
-        (4, 5, 6), (4, 6, 7),
-        (4, 8, 9), (4, 9, 5),
-        (5, 9, 10), (5, 10, 6),
-        (6, 10, 11), (6, 11, 7),
-        (7, 11, 8), (7, 8, 4),
-
-        (8, 9, 10), (8, 10, 11),
+        (0, 1, 2),
+        (0, 2, 3),
+        (0, 4, 5),
+        (0, 5, 1),
+        (1, 5, 6),
+        (1, 6, 2),
+        (2, 6, 7),
+        (2, 7, 3),
+        (3, 7, 4),
+        (3, 4, 0),
+        (4, 5, 6),
+        (4, 6, 7),
+        (4, 8, 9),
+        (4, 9, 5),
+        (5, 9, 10),
+        (5, 10, 6),
+        (6, 10, 11),
+        (6, 11, 7),
+        (7, 11, 8),
+        (7, 8, 4),
+        (8, 9, 10),
+        (8, 10, 11),
     ]
 
     trunk_mesh = Mesh(trunk_verts, trunk_faces, trunk_colour, position)
     meshes.append(trunk_mesh)
 
-
     num_branches = rng.randint(3, 8)
     branch_tips = []
 
     for i in range(num_branches):
-
         bh = trunk_h * rng.uniform(0.3, 0.95)
-
 
         yaw = rng.uniform(0, 2.0 * math.pi)
 
         pitch = rng.uniform(0.25, 1.15)
 
-
         crown_r = rng.uniform(0.8, 3.0)
         branch_len = crown_r * rng.uniform(0.3, 0.6)
-
 
         end_x = position[0] + math.cos(yaw) * math.cos(pitch) * branch_len
         end_y = position[1] + bh + math.sin(pitch) * branch_len
         end_z = position[2] + math.sin(yaw) * math.cos(pitch) * branch_len
-
 
         t = bh / trunk_h
         r_at_h = trunk_base_r + (trunk_top_r - trunk_base_r) * t
@@ -308,9 +313,7 @@ def create_tree(position, seed, base_height=4.0):
         if branch_mesh:
             meshes.append(branch_mesh)
 
-
         branch_tips.append(end)
-
 
         if rng.random() < 0.4 and len(branch_tips) < 8:
             fork_yaw = yaw + rng.uniform(-0.6, 0.6)
@@ -320,19 +323,14 @@ def create_tree(position, seed, base_height=4.0):
             fork_end_y = end_y + math.sin(fork_pitch) * fork_len
             fork_end_z = end_z + math.sin(fork_yaw) * math.cos(fork_pitch) * fork_len
             fork_end = (fork_end_x, fork_end_y, fork_end_z)
-            fork_mesh = create_branch(
-                end, fork_end, branch_width * 0.7, branch_colour
-            )
+            fork_mesh = create_branch(end, fork_end, branch_width * 0.7, branch_colour)
             if fork_mesh:
                 meshes.append(fork_mesh)
             branch_tips.append(fork_end)
 
-
     num_clusters = rng.randint(1, 2)
 
-
     cluster_positions = list(branch_tips)
-
 
     crown_radius = rng.uniform(0.8, 3.0)
     for _ in range(num_clusters - len(cluster_positions)):
@@ -345,7 +343,6 @@ def create_tree(position, seed, base_height=4.0):
         cluster_positions.append((cx, cy, cz))
 
     for cpos in cluster_positions:
-
         cluster_r = rng.uniform(0.3, 0.9)
         cluster_h = rng.uniform(0.3, 0.7)
 
@@ -364,7 +361,6 @@ def create_tree(position, seed, base_height=4.0):
 
 def create_bush(position, seed):
 
-
     rng = random.Random(seed)
     radius = rng.uniform(0.4, 1.0)
     height = rng.uniform(0.3, 0.8)
@@ -377,12 +373,12 @@ def create_bush(position, seed):
 
     verts = [
         (-radius, 0.0, 0.0),
-        ( radius, 0.0, 0.0),
+        (radius, 0.0, 0.0),
         (0.0, height, 0.0),
         (0.0, 0.0, -radius),
-        (0.0, 0.0,  radius),
+        (0.0, 0.0, radius),
         (-radius * 0.7, 0.0, -radius * 0.7),
-        ( radius * 0.7, 0.0,  radius * 0.7),
+        (radius * 0.7, 0.0, radius * 0.7),
     ]
     faces = [
         (0, 1, 2),
@@ -408,11 +404,11 @@ def create_rock(position, seed):
     hw = w / 2
     hd = d / 2
     verts = [
-        (-hw, -h/2, -hd),
-        ( hw, -h/2, -hd),
-        ( hw, -h/2,  hd),
-        (-hw, -h/2,  hd),
-        (rng.uniform(-hw*0.3, hw*0.3), h/2, rng.uniform(-hd*0.3, hd*0.3)),
+        (-hw, -h / 2, -hd),
+        (hw, -h / 2, -hd),
+        (hw, -h / 2, hd),
+        (-hw, -h / 2, hd),
+        (rng.uniform(-hw * 0.3, hw * 0.3), h / 2, rng.uniform(-hd * 0.3, hd * 0.3)),
     ]
     faces = [
         (0, 1, 4),
@@ -440,10 +436,10 @@ def create_spinifex(position, seed):
 
     verts = [
         (-radius, 0.0, 0.0),
-        ( radius, 0.0, 0.0),
+        (radius, 0.0, 0.0),
         (0.0, height, 0.0),
         (0.0, 0.0, -radius),
-        (0.0, 0.0,  radius),
+        (0.0, 0.0, radius),
     ]
     faces = [
         (0, 1, 2),

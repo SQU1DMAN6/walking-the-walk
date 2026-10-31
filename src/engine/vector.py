@@ -5,6 +5,4 @@ class Vec3:
         self.z = z
 
     def copy(self):
-        return Vec3(
-            self.x, self.y, self.z
-        )
+        return Vec3(self.x, self.y, self.z)

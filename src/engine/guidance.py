@@ -1,6 +1,6 @@
-from dataclasses import dataclass
 import heapq
 import math
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,11 @@ class ActionCoach:
 
 class PathGuide:
     def __init__(self, paths):
-        self.nodes = list(dict.fromkeys(paths.route+[point for branch in paths.branches for point in branch]))
+        self.nodes = list(
+            dict.fromkeys(
+                paths.route + [point for branch in paths.branches for point in branch]
+            )
+        )
         index = {point: i for i, point in enumerate(self.nodes)}
         self.edges = [[] for _ in self.nodes]
         for a, b in paths.segments:
@@ -33,7 +37,9 @@ class PathGuide:
             self.edges[j].append((i, distance))
 
     def route(self, source, goal):
-        start = min(range(len(self.nodes)), key=lambda i: math.dist(source, self.nodes[i]))
+        start = min(
+            range(len(self.nodes)), key=lambda i: math.dist(source, self.nodes[i])
+        )
         end = min(range(len(self.nodes)), key=lambda i: math.dist(goal, self.nodes[i]))
         queue, costs, previous = [(0, start)], {start: 0}, {}
         while queue:
@@ -43,7 +49,7 @@ class PathGuide:
             if node == end:
                 break
             for other, distance in self.edges[node]:
-                candidate = cost+distance
+                candidate = cost + distance
                 if candidate < costs.get(other, math.inf):
                     costs[other], previous[other] = candidate, node
                     heapq.heappush(queue, (candidate, other))
@@ -53,12 +59,16 @@ class PathGuide:
         while route[-1] != start:
             route.append(previous[route[-1]])
         route.reverse()
-        return [self.nodes[i] for i in route], math.dist(source, self.nodes[start])+costs[end]+math.dist(self.nodes[end], goal)
+        return [self.nodes[i] for i in route], math.dist(
+            source, self.nodes[start]
+        ) + costs[end] + math.dist(self.nodes[end], goal)
 
     def next_waypoint(self, source, goal):
         route, _ = self.route(source, goal)
         if not route:
             return goal
-        if math.dist(source, route[0]) > .9:
+        if math.dist(source, route[0]) > 0.9:
             return route[0]
-        return next((point for point in route[1:] if math.dist(source, point) >= 1.5), goal)
+        return next(
+            (point for point in route[1:] if math.dist(source, point) >= 1.5), goal
+        )

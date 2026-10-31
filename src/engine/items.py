@@ -1,6 +1,5 @@
 from engine.run_recipes import EXTRA_RECIPES
 
-
 ITEMS = {
     "food": ("Canned food", "Consumable", 5),
     "water": ("Bottled water", "Consumable", 3),
@@ -15,10 +14,18 @@ ITEMS = {
     "bandage": ("Bandage", "Consumable", 15),
 }
 RECIPES = {
-    "compass": {"name": "Compass", "materials": {"metal_scrap": 1, "plastic_scrap": 1},
-                "output": "compass", "quantity": 1},
-    "spear": {"name": "Stone spear", "materials": {"stick": 2, "rock": 1},
-              "output": "spear", "quantity": 1},
+    "compass": {
+        "name": "Compass",
+        "materials": {"metal_scrap": 1, "plastic_scrap": 1},
+        "output": "compass",
+        "quantity": 1,
+    },
+    "spear": {
+        "name": "Stone spear",
+        "materials": {"stick": 2, "rock": 1},
+        "output": "spear",
+        "quantity": 1,
+    },
 }
 RECIPES.update(EXTRA_RECIPES)
 RECIPE_ORDER = ["compass", "spear"]

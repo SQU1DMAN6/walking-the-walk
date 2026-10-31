@@ -1,7 +1,8 @@
 import math
 
-from engine.vector import Vec3
 from engine.rasteriser import Rasteriser
+from engine.vector import Vec3
+
 
 class Renderer:
     def __init__(self, width, height):
@@ -15,29 +16,16 @@ class Renderer:
         if z <= 0.1:
             return None
 
-        x = (
-            vertex.x *
-            self.focal_length /
-            z
-        )
+        x = vertex.x * self.focal_length / z
 
-        y = (
-            vertex.y *
-            self.focal_length /
-            z
-        )
+        y = vertex.y * self.focal_length / z
 
         screen_x = int(self.width / 2 + x)
         screen_y = int(self.height / 2 - y)
 
         return (screen_x, screen_y)
 
-    def render_mesh(
-        self,
-        camera,
-        framebuffer,
-        mesh
-    ):
+    def render_mesh(self, camera, framebuffer, mesh):
         transformed_vertices = []
 
         cos_yaw = math.cos(camera.yaw)
@@ -62,18 +50,9 @@ class Renderer:
             ry = y * cos_pitch - rz * sin_pitch
             rz2 = y * sin_pitch + rz * cos_pitch
 
-            transformed_vertices.append(
-                Vec3(
-                    rx,
-                    ry,
-                    rz2
-                )
-            )
+            transformed_vertices.append(Vec3(rx, ry, rz2))
 
-        projected = [
-            self.project(v)
-            for v in transformed_vertices
-        ]
+        projected = [self.project(v) for v in transformed_vertices]
 
         triangles = []
 
@@ -84,15 +63,13 @@ class Renderer:
             p1 = projected[i1]
             p2 = projected[i2]
 
-            if (p0 is None or p1 is None or p2 is None):
+            if p0 is None or p1 is None or p2 is None:
                 continue
 
             depth = (
                 transformed_vertices[i0].z
-                +
-                transformed_vertices[i1].z
-                +
-                transformed_vertices[i2].z
+                + transformed_vertices[i1].z
+                + transformed_vertices[i2].z
             ) / 3
 
             triangles.append((depth, p0, p1, p2))
@@ -100,10 +77,4 @@ class Renderer:
         triangles.sort(key=lambda t: t[0], reverse=True)
 
         for _, p0, p1, p2 in triangles:
-            Rasteriser.draw_triangle(
-                framebuffer,
-                p0,
-                p1,
-                p2,
-                mesh.colour
-            )
+            Rasteriser.draw_triangle(framebuffer, p0, p1, p2, mesh.colour)
