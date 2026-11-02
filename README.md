@@ -19,7 +19,7 @@ python -m pip install -r requirements.txt
 python src/main.py
 ```
 
-In future, pre-build binaries targeting Windows and Linux will be made and deployed with each release.
+For a Windows x64 build, run `windows_build\build.bat` from this checkout. It creates an isolated build environment, runs compatibility checks, builds and tests the executable, and writes `windows_build/WalkingTheWalk-windows-x64.zip`. Extract the entire archive and run `WalkingTheWalk.exe` inside its folder. Build prerequisites and validation commands are in [windows_build/README.md](windows_build/README.md); the Windows compatibility report is in [doc/windows-compatibility.md](doc/windows-compatibility.md).
 
 The game starts fullscreen. Use `--windowed --width 1280 --height 800` for a window, and the developer option `--seed <seed>` for a reproducible world (normal new runs choose fresh seeds). The publisher intro can be skipped with a key or click. Esc quits from the title.
 
@@ -76,7 +76,7 @@ Tests use SDL offscreen and real OpenGL, with current results under `doc/validat
 
 Hardware rendering keeps the native scene resolution and the existing 60 FPS loop target. Detected software OpenGL drivers cap the 3D scene at 288×162, preserving aspect ratio with crisp nearest-neighbour scaling, to reduce CPU drawing cost. The HUD and original PSF text always render at native window resolution. Text, hotbar surfaces and HUD texture storage are reused between frames. Frame-rate targets still need verification on the release hardware.
 
-Streaming retains at most 36 chunks (including up to eight pinned encounter chunks), two pending generation jobs and one generation worker, with no unloaded terrain cache. Rendering uploads at most one changed chunk per frame after initial loading. Exploration is bounded at ±8,192 metres; there is room well beyond the route without an immediate tree-line wall. Per-run edits are in memory, with limits of 4,096 chopped trees, 4,096 saved partial chops and 512 loose stacks. There is no save-to-disk feature. `doc/` and `tests/` remain ignored by the repository's existing Git rules.
+Streaming retains at most 36 chunks (including up to eight pinned encounter chunks), two pending generation jobs and one generation worker, with no unloaded terrain cache. Rendering uploads at most one changed chunk per frame after initial loading. Exploration is bounded at ±8,192 metres; there is room well beyond the route without an immediate tree-line wall. Per-run edits are in memory, with limits of 4,096 chopped trees, 4,096 saved partial chops and 512 loose stacks. There is no save-to-disk feature. Historical `doc/` material and `tests/` remain ignored; the Windows compatibility report and `doc/validation/windows-x64/` evidence are included in version control.
 
 _Walking the Walk, Version 1.7, Written by Quan Thai, October 2026_
 

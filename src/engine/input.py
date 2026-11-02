@@ -13,7 +13,11 @@ class PointerCapture:
             return
         pygame.event.set_grab(active)
         pygame.mouse.set_visible(not active)
-        self.window.relative_mouse = active
+        # pygame-ce exposes relative mode on mouse, not Window. Classic pygame
+        # provides virtual relative input through the grab + hidden cursor above.
+        set_relative_mode = getattr(pygame.mouse, "set_relative_mode", None)
+        if set_relative_mode is not None:
+            set_relative_mode(active)
         pygame.mouse.get_rel()
         self.active = active
         self._settling_frames = 2 if active else 0

@@ -601,12 +601,12 @@ class TutorialHUD:
             for index, (label, button) in enumerate(zip(TITLE_BUTTONS, buttons)):
                 self.button(surface, button, label, index == menu.selected)
             hint = "First time playing? Start with Tutorial so you don't regret life"
-            available = width - buttons[1].right - 26
+            available = width - buttons[1].right - 10
             if available >= 210:
                 rect = pygame.Rect(
-                    buttons[1].right + 10,
+                    buttons[1].right + 30,
                     buttons[1].y,
-                    min(360, available),
+                    min(600, available),
                     buttons[1].height,
                 )
                 self.coach(surface, hint, buttons[1].midright, rect)

@@ -3,3 +3,7 @@
 doc/
 tests/
 tmp/
+
+windows_build/build/
+windows_build/dist/
+windows_build/*.zip

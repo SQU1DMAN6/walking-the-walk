@@ -1,7 +1,14 @@
+if __name__ == "__main__":
+    from multiprocessing import freeze_support
+
+    freeze_support()
+
 import argparse
 import copy
 import json
 import math
+import os
+import sys
 import signal
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +38,15 @@ from engine.ui import TutorialHUD
 from engine.workshop_ui import ExpandedTutorialHUD
 
 SKY_COLOUR = (0.36, 0.65, 0.88)
+
+
+def configure_display_environment():
+    # Set tis before SDL video initialisation so desktop/window sizes are physical
+    # pixels rather than Windows DPI-virtualised sizes stretched by the OS.
+    # (so the thing ain't blurry)
+    if sys.platform == "win32":
+        os.environ.setdefault("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2")
+        os.environ.setdefault("SDL_WINDOWS_DPI_SCALING", "0")
 
 
 def create_display(args):
@@ -214,7 +230,7 @@ class Application:
             and event.mod & pygame.KMOD_CTRL
         ):
             self.running = False
-        elif event.type == pygame.WINDOWRESIZED:
+        elif event.type in (pygame.WINDOWRESIZED, pygame.WINDOWSIZECHANGED):
             self.width, self.height = max(640, event.x), max(480, event.y)
             if (self.width, self.height) != (event.x, event.y):
                 self.pointer.window.size = self.width, self.height
@@ -689,6 +705,7 @@ def main(argv=None):
     )
     parser.add_argument("--screenshot", help="Save one rendered frame to this PNG path")
     args = parser.parse_args(argv)
+    configure_display_environment()
     pygame.display.init()
     pygame.display.set_caption("Walking the Walk - CS Jungle")
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
